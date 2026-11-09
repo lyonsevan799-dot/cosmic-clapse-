@@ -33,7 +33,7 @@ export default function CosmicCollapse() {
   const pausedRef = useRef(paused); pausedRef.current = paused;
   const [settingsFrom, setSettingsFrom] = useState<"menu" | "pause">("menu");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [hud, setHud] = useState<HudState>({ mass: 0, time: 0 });
+  const [hud, setHud] = useState<HudState>({ mass: 0, time: 0, strikeReady: 1, strikePhase: "ready" });
   const [toasts, setToasts] = useState<{ id: number; msg: string; ach?: boolean }[]>([]);
   const [tut, setTut] = useState<number | null>(null);
   const tutRef = useRef<{ step: number | null; since: number; flags: Set<string> }>({ step: null, since: 0, flags: new Set() });
@@ -249,6 +249,10 @@ export default function CosmicCollapse() {
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Mass</div>
               <div className="font-display text-2xl text-primary sm:text-3xl">{formatMass(hud.mass)}</div>
               <div className="text-[11px] text-muted-foreground">{arenaMode ? `${arenaState.alive} in arena` : `Best ${formatMass(best)}`}</div>
+              {arenaMode && <div className="mt-1.5" aria-label="Core strike cooldown">
+                <div className="mb-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">{hud.strikePhase === "ready" ? "Strike ready" : hud.strikePhase === "charge" ? "Charging…" : hud.strikePhase === "active" ? "Striking!" : "Recharging"}</div>
+                <div className="cc-progress-track"><div className="cc-progress-fill" style={{ width: `${hud.strikeReady * 100}%` }} /></div>
+              </div>}
             </div>
             {!arenaMode && <div className="cc-panel order-3 w-full px-3 py-2 sm:order-none sm:w-auto sm:min-w-[300px]">
               {next ? (<>
@@ -288,7 +292,7 @@ export default function CosmicCollapse() {
               onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); engineRef.current?.setBoost(true); }}
               onPointerUp={() => engineRef.current?.setBoost(false)} onPointerCancel={() => engineRef.current?.setBoost(false)} onLostPointerCapture={() => engineRef.current?.setBoost(false)}>BOOST</button>
             <button type="button" aria-label="Strike" className="cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
-              onPointerDown={(e) => { e.preventDefault(); engineRef.current?.strike(); }}>STRIKE</button>
+              onPointerDown={(e) => { e.preventDefault(); engineRef.current?.strike(); }}><span style={{ opacity: hud.strikeReady >= 1 ? 1 : 0.45 }}>{hud.strikeReady >= 1 ? "STRIKE" : `${Math.round(hud.strikeReady * 100)}%`}</span></button>
           </>)}
 
           {paused && !confirm && (

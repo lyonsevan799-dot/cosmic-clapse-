@@ -7,7 +7,7 @@ import { sfx } from "./audio";
 import { MAX_SPEED, BOOST, STRIKE, steer,
   ARENA, PERSONALITIES, SpatialGrid, botStartMass, canEat, computeLeaderboard, decide,
   eliminationReward, makeBotName, newStrike, pickPersonality, randomSkin, spawnPosAwayFrom,
-  strikeConnected, strikeHits, tickStrike, tryStrike,
+  strikeConnected, strikeHits, tickStrike, tryStrike, dodgeTarget,
   type Bot, type LeaderEntry, type StrikeState,
 } from "./arena";
 
@@ -23,7 +23,7 @@ interface Particle { x: number; y: number; vx: number; vy: number; life: number;
 interface Ring { x: number; y: number; r: number; max: number; life: number; dur: number; color: string; width: number; }
 interface FloatText { text: string; life: number; color: string; big: boolean; }
 
-export interface HudState { mass: number; time: number; }
+export interface HudState { mass: number; time: number; /** 0 = just used, 1 = ready. */ strikeReady: number; strikePhase: string; }
 export interface EngineCallbacks {
   onHud?: (h: HudState) => void;
   onPauseRequest?: () => void;
@@ -132,7 +132,7 @@ export class Engine {
   resetInput() { this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.mouse.down = false; this.mouse.active = false; this.boostBtn = false; this.boosting = false; }
   private vulnerable(victim: Bot | "player") { return (victim === "player" ? this.pStrike : victim.strike).vuln > 0; }
   /** Normal size rule, or anyone at 60% of the mass can eat a hole recovering from a missed strike. */
-  private canTake(aMass: number, vMass: number, vuln: boolean) { return canEat(aMass, vMass) || (vuln && aMass >= vMass * 0.6); }
+  private canTake(aMass: number, vMass: number, vs: StrikeState) { return vs.phase !== "active" && (canEat(aMass, vMass) || (vs.vuln > 0 && aMass >= vMass * 0.6)); }
   setJoystick(x: number, y: number) { this.joy.x = x; this.joy.y = y; }
 
   resize = () => {
@@ -360,6 +360,13 @@ export class Engine {
         // Bold rivals sometimes gamble on a core strike against a nearby bigger hole.
         if (threat && td < radiusForMass(threat.mass) * 2.5 && (bot.personality === "aggressive" || bot.personality === "competitive")
           && Math.random() < 0.2) tryStrike(bot.strike, threat.x - bot.x, threat.y - bot.y);
+        // Read telegraphed strikes aimed at this hole and (imperfectly) sidestep them.
+        for (const o of [...nearby, ...(this.playerAlive ? [P] : [])]) {
+          if (o === bot || ("alive" in o && !o.alive)) continue;
+          const os = o === P ? this.pStrike : (o as Bot).strike;
+          const dodge = dodgeTarget(bot.x, bot.y, r, o.x, o.y, os, Math.random);
+          if (dodge) { bot.tx = dodge.x; bot.ty = dodge.y; break; }
+        }
       }
       const dx = bot.tx - bot.x, dy = bot.ty - bot.y, d = Math.hypot(dx, dy) || 1;
       const a = Math.atan2(dy, dx) + Math.sin(this.time * 1.4 + bot.wob) * 0.12;
@@ -377,15 +384,15 @@ export class Engine {
         if (other === bot || !other.alive || !bot.alive) continue;
         const od = Math.hypot(bot.x - other.x, bot.y - other.y), orad = radiusForMass(other.mass);
         if (st.phase === "active" && strikeHits(bot.x, bot.y, other.x, other.y, orad)) { strikeConnected(st); this.eatBot(other, bot); }
-        else if (this.canTake(bot.mass, other.mass, other.strike.vuln > 0) && od < r * 0.95 + orad * 0.35) this.eatBot(other, bot);
+        else if (this.canTake(bot.mass, other.mass, other.strike) && od < r * 0.95 + orad * 0.35) this.eatBot(other, bot);
       }
       if (this.playerAlive && bot.alive) {
         const distance = Math.hypot(bot.x - P.x, bot.y - P.y), prad = radiusForMass(P.mass);
         const botHits = st.phase === "active" && strikeHits(bot.x, bot.y, P.x, P.y, prad);
         const playerHits = this.pStrike.phase === "active" && strikeHits(P.x, P.y, bot.x, bot.y, r);
-        if (playerHits) { strikeConnected(this.pStrike); this.eatBot(bot, "player"); sfx.strikeHit(); this.shake = Math.max(this.shake, 0.6); }
-        else if (this.canTake(P.mass, bot.mass, st.vuln > 0) && distance < prad * 0.95 + r * 0.35) this.eatBot(bot, "player");
-        else if (botHits || (this.canTake(bot.mass, P.mass, this.pStrike.vuln > 0) && distance < r * 0.95 + prad * 0.35)) {
+        if (playerHits) { strikeConnected(this.pStrike); this.eatBot(bot, "player"); sfx.strikeHit(); this.shake = Math.max(this.shake, 0.6); this.emit(bot.x, bot.y, 26, this.skin.hot, r * this.cam.zoom * 0.25, 260); this.texts.push({ text: "CORE STRIKE!", life: 0, color: this.skin.hot, big: true }); }
+        else if (this.canTake(P.mass, bot.mass, st) && distance < prad * 0.95 + r * 0.35) this.eatBot(bot, "player");
+        else if (botHits || (this.canTake(bot.mass, P.mass, this.pStrike) && distance < r * 0.95 + prad * 0.35)) {
           if (botHits) strikeConnected(st);
           this.playerAlive = false; this.playerKiller = bot; this.playerDieT = 0; this.resetInput();
           this.cb.onKill?.(`${bot.name} absorbed You`);
@@ -585,7 +592,7 @@ export class Engine {
     } else if (P.mass > 6000) { P.mass = 300; this.topIdx = topEligibleIndex(300); }
   }
 
-  emitHud() { this.cb.onHud?.({ mass: this.player.mass, time: this.runTime }); }
+  emitHud() { const s = this.pStrike; this.cb.onHud?.({ mass: this.player.mass, time: this.runTime, strikeReady: s.phase === "cooldown" ? 1 - s.cd / STRIKE.cooldown : s.phase === "ready" ? 1 : 0, strikePhase: s.phase }); }
 
   private consume(b: Body) {
     if (b.dead) return;

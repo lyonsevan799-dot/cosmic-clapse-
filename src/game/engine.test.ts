@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Engine } from "./engine";
 import { PLAYER, kindAt } from "./data";
-import { ARENA } from "./arena";
-import { radiusForMass } from "./logic";
+import { ARENA, dodgeTarget, newStrike, tryStrike } from "./arena";
+import { MAX_RADIUS, addMass, radiusForMass } from "./logic";
 
 vi.mock("./audio", () => ({ sfx: new Proxy({}, { get: () => vi.fn() }) }));
 vi.mock("./sprites", () => ({ getSprite: () => null, VARIANTS: 4, rng: () => () => 0.5 }));
@@ -135,14 +135,31 @@ describe("arena simulation", () => {
   });
 });
 describe("core strike", () => {
-  it("lets a small player defeat a much bigger rival by reaching its core", () => {
+  const duel = (playerMass: number, rivalMass: number, gap: number) => {
     engine.startArena(10); engine.bodies = [];
     for (const b of engine.bots) { b.x = engine.worldR * 0.8; b.y = b.id * 100; b.mass = b.disp = 10; }
-    const big = engine.bots[0]; big.mass = big.disp = 400; big.x = 3; big.y = 0; big.thinkT = 99; big.tx = 3; big.ty = 0;
-    engine.player.mass = engine.player.disp = 40;
-    engine.strike(); tick(engine, 1.4);
-    expect(big.alive).toBe(false); expect(engine.playerAlive).toBe(true);
-    expect(engine.player.mass).toBeGreaterThan(40 + 400 * 0.45);
+    const P = engine.player; P.mass = P.disp = playerMass; P.vx = P.vy = 0;
+    const rival = engine.bots[0]; rival.mass = rival.disp = rivalMass;
+    rival.x = P.x + radiusForMass(rivalMass) + gap; rival.y = P.y; rival.thinkT = 99; rival.tx = rival.x; rival.ty = rival.y;
+    return rival;
+  };
+  it.each([[40, 40], [40, 200], [40, 800]])("a %s-mass player core-strikes a %s-mass rival", (pm, rm) => {
+    const rival = duel(pm, rm, 20);
+    engine.strike(); tick(engine, 1.2);
+    expect(rival.alive).toBe(false); expect(engine.playerAlive).toBe(true);
+    tick(engine, 1);
+    expect(engine.player.mass).toBeGreaterThan(pm + rm * 0.45);
+  });
+  it("two large holes: a strike still beats an equal giant", () => {
+    const rival = duel(1e6, 1e6, -radiusForMass(1e6) * 0.5 + 20);
+    engine.strike(); tick(engine, 1.2);
+    expect(rival.alive).toBe(false); expect(engine.playerAlive).toBe(true);
+  });
+  it("a large rival reads a telegraphed strike and sidesteps", () => {
+    const s = newStrike(); tryStrike(s, 1, 0);
+    const dodge = dodgeTarget(100, 0, 40, 0, 0, s, () => 0.9);
+    expect(dodge).not.toBeNull(); expect(Math.abs(dodge!.y)).toBeGreaterThan(200);
+    expect(dodgeTarget(100, 0, 40, 0, 0, newStrike(), () => 0.9)).toBeNull();
   });
   it("a missed strike leaves the player vulnerable to a slightly bigger rival", () => {
     engine.startArena(10); engine.bodies = [];
@@ -160,5 +177,24 @@ describe("constant speed", () => {
     (engine as unknown as { keys: Set<string> }).keys.add("d"); engine.bots = []; engine.bodies = [];
     tick(engine, 4);
     expect(Math.hypot(engine.player.vx, engine.player.vy)).toBeCloseTo(95, 0);
+  });
+});
+
+describe("endgame size", () => {
+  it("keeps the largest holes at 5–8% of the arena diameter while mass keeps growing", () => {
+    for (const m of [1e6, 1e9, 1e15, 1e100]) {
+      const share = radiusForMass(m) * 2 / (ARENA.worldRadius * 2);
+      expect(share).toBeGreaterThan(0.05); expect(share).toBeLessThan(0.08);
+    }
+    expect(radiusForMass(1e12)).toBeLessThanOrEqual(MAX_RADIUS * 1.08);
+    expect(addMass(1e12, 5e11)).toBe(1.5e12);
+  });
+  it("runs smoothly with every opponent active at endgame mass", () => {
+    engine.startArena(100); engine.player.mass = engine.player.disp = 1e8;
+    for (const b of engine.bots) b.mass = b.disp = 1e4 + b.id * 1e5;
+    const t0 = performance.now(); tick(engine, 3);
+    expect(performance.now() - t0).toBeLessThan(3000);
+    expect(engine.bots.length).toBeGreaterThanOrEqual(100);
+    expect(engine.bots.every((b) => Number.isFinite(b.x) && Number.isFinite(b.mass))).toBe(true);
   });
 });

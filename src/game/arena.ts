@@ -113,6 +113,19 @@ export function tickStrike(s: StrikeState, dt: number): "fired" | "whiffed" | nu
   return null;
 }
 
+/**
+ * Defender read of an incoming strike: when an attacker is charging or lunging at us from close range,
+ * sidestep perpendicular to its aim. Imperfect on purpose (misses ~40% of reads).
+ */
+export function dodgeTarget(x: number, y: number, r: number, ax: number, ay: number, s: StrikeState, rand: () => number) {
+  if (s.phase !== "charge" && s.phase !== "active") return null;
+  const dx = x - ax, dy = y - ay, d = Math.hypot(dx, dy);
+  if (d < 1e-6 || d > Math.max(r * 4, 260)) return null;
+  if ((s.dirX * dx + s.dirY * dy) / d < 0.6 || rand() < 0.4) return null;
+  const side = rand() < 0.5 ? 1 : -1;
+  return { x: x - s.dirY * side * (r * 3 + 120), y: y + s.dirX * side * (r * 3 + 120) };
+}
+
 /** A connected strike goes on cooldown without the vulnerability penalty. */
 export function strikeConnected(s: StrikeState) {
   if (s.phase === "active" || s.phase === "charge") { s.phase = "cooldown"; s.t = 0; s.cd = STRIKE.cooldown; }
