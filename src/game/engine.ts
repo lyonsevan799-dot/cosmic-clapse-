@@ -285,13 +285,23 @@ export class Engine {
     this.cb.onArena?.({ ...lb, alive: this.bots.filter((b) => b.alive).length + (this.playerAlive ? 1 : 0) });
   }
 
-  /** Telegraph: pulsing ring while charging, bright ring while lunging, faint arc while vulnerable. */
-  private strikeRing(x: number, y: number, r: number, s: StrikeState, color: string) {
-    if (!Number.isFinite(x + y + r) || r <= 0) return;
-    const ctx = this.ctx; ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = Math.max(2, r * 0.08);
-    if (s.phase === "charge") { ctx.globalAlpha = 0.5 + 0.4 * Math.sin(this.time * 30); ctx.beginPath(); ctx.arc(x, y, r * (2.2 - s.t / STRIKE.charge), 0, TAU); ctx.stroke(); }
-    else if (s.phase === "active") { ctx.globalAlpha = 0.9; ctx.beginPath(); ctx.arc(x, y, r * 1.3, 0, TAU); ctx.stroke(); }
-    else if (s.vuln > 0) { ctx.globalAlpha = 0.35; ctx.setLineDash([6, 6]); ctx.beginPath(); ctx.arc(x, y, r * 1.5, 0, TAU); ctx.stroke(); }
+  /** Bright aura and activation pulse; radius itself is rendered by the boosted black hole. */
+  private surgeAura(x: number, y: number, r: number, s: SurgeState, color: string) {
+    const energy = (s.scale - 1) / (SURGE.radiusMult - 1);
+    if (!Number.isFinite(x + y + r + energy) || r <= 0 || energy <= 0.01) return;
+    const ctx = this.ctx; ctx.save(); ctx.globalCompositeOperation = "lighter";
+    const glow = ctx.createRadialGradient(x, y, r, x, y, r * 2.2);
+    glow.addColorStop(0, color + "55"); glow.addColorStop(0.45, color + "22"); glow.addColorStop(1, color + "00");
+    ctx.globalAlpha = energy * (0.75 + 0.15 * Math.sin(this.time * 12));
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(x, y, r * 2.2, 0, TAU); ctx.fill();
+    ctx.strokeStyle = color; ctx.lineWidth = Math.max(1.5, r * 0.05);
+    ctx.globalAlpha = energy * 0.65; ctx.setLineDash([r * 0.3, r * 0.18]); ctx.lineDashOffset = -this.time * r;
+    ctx.beginPath(); ctx.arc(x, y, r * 1.28, 0, TAU); ctx.stroke();
+    if (s.active && s.t < 0.55) {
+      const p = s.t / 0.55;
+      ctx.setLineDash([]); ctx.globalAlpha = (1 - p) * 0.8; ctx.lineWidth = Math.max(2, r * 0.08 * (1 - p));
+      ctx.beginPath(); ctx.arc(x, y, r * (1.1 + p * 1.5), 0, TAU); ctx.stroke();
+    }
     ctx.restore();
   }
 
@@ -320,7 +330,7 @@ export class Engine {
         if (target) { bot.x += (target.x - bot.x) * Math.min(1, dt * 9); bot.y += (target.y - bot.y) * Math.min(1, dt * 9); }
         if (bot.dieT >= bot.dieDur) {
           if (bot.eater === "player" && this.playerAlive) {
-            const last = this.farm.get(bot.name), farmed = last !== undefined && this.time - last < STRIKE.farmWindow;
+            const last = this.farm.get(bot.name), farmed = last !== undefined && this.time - last < SURGE.farmWindow;
             this.farm.set(bot.name, this.time);
             const gain = eliminationReward(bot.mass, P.mass, farmed);
             P.mass = addMass(P.mass, gain); this.topIdx = topEligibleIndex(P.mass);
@@ -341,7 +351,7 @@ export class Engine {
             Math.max(this.viewRadius() * 0.7, radiusForMass(P.mass) + radius + 24), this.worldR, radius, 24);
           Object.assign(bot, pos);
           bot.vx = bot.vy = 0; bot.alive = true; bot.thinkT = 0; bot.mode = "wander";
-          bot.tx = pos.x; bot.ty = pos.y; bot.foodRef = null; bot.strike = newStrike();
+          bot.tx = pos.x; bot.ty = pos.y; bot.foodRef = null; bot.surge = newSurge();
         }
         continue;
       }
@@ -602,7 +612,13 @@ export class Engine {
     } else if (P.mass > 6000) { P.mass = 300; this.topIdx = topEligibleIndex(300); }
   }
 
-  emitHud() { const s = this.pStrike; this.cb.onHud?.({ mass: this.player.mass, time: this.runTime, strikeReady: s.phase === "cooldown" ? 1 - s.cd / STRIKE.cooldown : s.phase === "ready" ? 1 : 0, strikePhase: s.phase }); }
+  emitHud() {
+    const s = this.pSurge;
+    const surgePhase = s.active ? "active" as const : s.cd > 0 ? "cooldown" as const : "ready" as const;
+    const surgeProgress = s.active ? Math.max(0, 1 - s.t / SURGE.duration) : s.cd > 0 ? 1 - s.cd / SURGE.cooldown : 1;
+    this.cb.onHud?.({ mass: this.player.mass, time: this.runTime, surgePhase, surgeProgress,
+      surgeRemaining: s.active ? Math.max(0, SURGE.duration - s.t) : 0, surgeCooldown: s.cd });
+  }
 
   private consume(b: Body) {
     if (b.dead) return;
