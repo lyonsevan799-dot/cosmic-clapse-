@@ -70,9 +70,8 @@ class Audio {
   gem() { this.tone(1200, 0.12, "sine", 0.18, 1800); this.tone(1800, 0.12, "sine", 0.1, 2400, 0.06); }
   purchase() { this.tone(440, 0.12, "square", 0.08, 660); this.tone(880, 0.25, "triangle", 0.18, 1320, 0.08); }
   error() { this.tone(200, 0.15, "square", 0.08, 140); }
-  strikeCharge() { this.tone(140, 0.55, "sawtooth", 0.12, 620); this.tone(70, 0.55, "sine", 0.2, 180); }
-  strikeHit() { this.noise(0.8, 0.45, 2400, 80); this.tone(220, 0.7, "sine", 0.4, 45); this.tone(660, 0.3, "triangle", 0.16, 1200, 0.03); }
-  strikeMiss() { this.tone(420, 0.35, "triangle", 0.14, 130); }
+  surgeStart() { this.tone(110, 0.7, "sawtooth", 0.12, 440); this.tone(220, 0.8, "sine", 0.18, 880); }
+  surgeEnd() { this.tone(520, 0.35, "triangle", 0.1, 180); }
 
   music(on: boolean) { this.wantMusic = on; if (on) this.startMusic(); else this.stopMusic(); }
   private startMusic() {

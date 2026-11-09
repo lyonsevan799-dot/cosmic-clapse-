@@ -4,11 +4,11 @@ import { addMass, canAbsorb, formatMass, radiusForMass, type Settings } from "./
 import { getSprite, rng, VARIANTS, type Sprite } from "./sprites";
 import { drawBlackHole } from "./blackhole";
 import { sfx } from "./audio";
-import { MAX_SPEED, BOOST, STRIKE, steer,
+import { MAX_SPEED, BOOST, SURGE, steer,
   ARENA, PERSONALITIES, SpatialGrid, botStartMass, canEat, computeLeaderboard, decide,
-  eliminationReward, makeBotName, newStrike, pickPersonality, randomSkin, spawnPosAwayFrom,
-  strikeConnected, strikeHits, tickStrike, tryStrike, dodgeTarget,
-  type Bot, type LeaderEntry, type StrikeState,
+  drainSurgeMass, effectiveMass, eliminationReward, makeBotName, newSurge, pickPersonality, randomSkin,
+  shouldSurge, spawnPosAwayFrom, tickSurge, trySurge,
+  type Bot, type LeaderEntry, type SurgeState,
 } from "./arena";
 
 interface Body {
@@ -23,7 +23,14 @@ interface Particle { x: number; y: number; vx: number; vy: number; life: number;
 interface Ring { x: number; y: number; r: number; max: number; life: number; dur: number; color: string; width: number; }
 interface FloatText { text: string; life: number; color: string; big: boolean; }
 
-export interface HudState { mass: number; time: number; /** 0 = just used, 1 = ready. */ strikeReady: number; strikePhase: string; }
+export interface HudState {
+  mass: number; time: number;
+  surgePhase: "ready" | "active" | "cooldown";
+  /** Active time remaining, or cooldown recharge progress. */
+  surgeProgress: number;
+  surgeRemaining: number;
+  surgeCooldown: number;
+}
 export interface EngineCallbacks {
   onHud?: (h: HudState) => void;
   onPauseRequest?: () => void;
@@ -52,7 +59,7 @@ export class Engine {
   time = 0; runTime = 0; shake = 0; flash = 0; flashColor = "#fff"; pulse = 0;
   keys = new Set<string>(); joy = { x: 0, y: 0 };
   mouse = { x: 0, y: 0, active: false, down: false }; boostBtn = false; boosting = false; private shedT = 0;
-  pStrike: StrikeState = newStrike(); private farm = new Map<string, number>();
+  pSurge: SurgeState = newSurge(); private farm = new Map<string, number>();
   cfg: EngineConfig = { skin: "horizon", settings: { audio: true, sfx: 0.7, music: 0.4, shake: true, reduced: false, botCount: 100 } };
   skin: Skin = SKINS[0];
   topIdx = 0; hudT = 0; movedDist = 0; movedSent = false; pulledSent = false;
@@ -108,7 +115,7 @@ export class Engine {
       if (tgt && ["INPUT", "SELECT", "BUTTON"].includes(tgt.tagName)) return;
       if (this.mode === "play") { e.preventDefault(); this.keys.add("space"); } return;
     }
-    if ((k === "e" || k === "shift") && !e.repeat) { if (this.mode === "play" && !this.paused) this.strike(); return; }
+    if ((k === "e" || k === "shift") && !e.repeat) { if (this.mode === "play" && !this.paused) this.surge(); return; }
     if (["w", "a", "s", "d", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
       const tgt = e.target as HTMLElement | null;
       if (tgt && (tgt.tagName === "INPUT" || tgt.tagName === "SELECT")) return;
@@ -121,18 +128,21 @@ export class Engine {
   onPDown = (e: PointerEvent) => { if (e.pointerType !== "mouse") return; this.onPMove(e); this.mouse.down = true; };
   onPUp = () => { this.mouse.down = false; };
   setBoost(on: boolean) { this.boostBtn = on; }
-  /** Core strike: charge, then lunge; reaching a rival's core defeats it whatever its size. */
-  strike() {
-    if (!this.arena || !this.playerAlive) return;
-    const P = this.player, sp = Math.hypot(P.vx, P.vy);
-    if (tryStrike(this.pStrike, sp > 1 ? P.vx : 1, sp > 1 ? P.vy : 0)) sfx.strikeCharge();
+  /** Mass Surge: temporary radius and absorption power, paid for with mass. */
+  surge() {
+    if (!this.arena || !this.playerAlive || !trySurge(this.pSurge)) return;
+    const P = this.player, r = radiusForMass(P.mass);
+    this.rings.push({ x: P.x, y: P.y, r, max: r * 3.2, life: 0, dur: 0.55, color: this.skin.hot, width: 4 });
+    this.texts.push({ text: "MASS SURGE", life: 0, color: this.skin.hot, big: true });
+    sfx.surgeStart();
   }
   onBlurEv = () => { this.resetInput(); if (this.mode === "play" && !this.paused) this.cb.onBlur?.(); };
   onVis = () => { if (document.hidden) this.onBlurEv(); };
   resetInput() { this.keys.clear(); this.joy.x = 0; this.joy.y = 0; this.mouse.down = false; this.mouse.active = false; this.boostBtn = false; this.boosting = false; }
-  private vulnerable(victim: Bot | "player") { return (victim === "player" ? this.pStrike : victim.strike).vuln > 0; }
-  /** Normal size rule, or anyone at 60% of the mass can eat a hole recovering from a missed strike. */
-  private canTake(aMass: number, vMass: number, vs: StrikeState) { return vs.phase !== "active" && (canEat(aMass, vMass) || (vs.vuln > 0 && aMass >= vMass * 0.6)); }
+  /** Ordinary mass-ratio absorption using each hole's current smooth Surge scale. */
+  private canTake(aMass: number, aSurge: SurgeState, vMass: number, vSurge: SurgeState) {
+    return canEat(effectiveMass(aMass, aSurge.scale), effectiveMass(vMass, vSurge.scale));
+  }
   setJoystick(x: number, y: number) { this.joy.x = x; this.joy.y = y; }
 
   resize = () => {
@@ -160,7 +170,7 @@ export class Engine {
   startRun(mass: number) { this.arena = false; this.bots = []; this.playerAlive = true; this.mode = "play"; this.paused = false; this.reset(Math.max(PLAYER.startMass, mass)); this.emitHud(); }
   startArena(count = this.cfg.settings.botCount) {
     this.startRun(PLAYER.startMass);
-    this.arena = true; this.playerDieT = 0; this.playerKiller = null; this.pStrike = newStrike(); this.farm.clear();
+    this.arena = true; this.playerDieT = 0; this.playerKiller = null; this.pSurge = newSurge(); this.farm.clear();
     this.worldR = ARENA.worldRadius;
     const used = new Set<string>();
     this.bots = Array.from({ length: Math.max(10, Math.min(150, Math.round(count))) }, (_, id) => {
@@ -170,7 +180,7 @@ export class Engine {
         vx: 0, vy: 0, mass, disp: mass, personality: pickPersonality(Math.random),
         speed: 0.8 + Math.random() * 0.35, thinkT: Math.random() * 0.4, mode: "wander" as const,
         tx: pos.x, ty: pos.y, foodRef: null, alive: true, respawnT: 0,
-        dying: false, dieT: 0, dieDur: 0.6, eater: null, wob: Math.random() * TAU, strike: newStrike() };
+        dying: false, dieT: 0, dieDur: 0.6, eater: null, wob: Math.random() * TAU, surge: newSurge() };
     });
     this.bodies = [];
     for (let i = 0; i < ARENA.density; i++) this.spawnArenaFood(i < 70);

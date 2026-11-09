@@ -9,3 +9,10 @@
 - [x] Fix geometry-aware respawns, smooth bounded zoom and safe tiny rendering without reducing mass.
 - [x] Test every requested mass from 10,000 to 1 billion, recovery, collection and ordinary gameplay.
 - [x] Verify preview and standalone game; package the updated download.
+
+## Replace Core Strike with Mass Surge
+- [ ] Remove instant-kill/core-strike rules, controls, AI dodges and UI.
+- [ ] Add configurable four-second Mass Surge with smooth 1.6× radius, 3%/s mass drain and cooldown.
+- [ ] Apply boosted size to absorption and teach bots to surge during hunts and escapes.
+- [ ] Add aura, pulse, duration/cooldown indicators and desktop/mobile controls.
+- [ ] Test surge rules and verify live gameplay on desktop and mobile.

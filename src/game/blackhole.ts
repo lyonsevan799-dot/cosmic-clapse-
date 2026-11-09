@@ -21,9 +21,10 @@ export function skinColors(skin: Skin, t: number) {
 }
 
 /** Draw at screen position (x,y), r = event-horizon radius in px. */
-export function drawBlackHole(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t: number, skinIn: Skin, reduced: boolean, pulse = 0) {
-  if (![x, y, r, t, pulse].every(Number.isFinite) || r <= 0) return;
+export function drawBlackHole(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, t: number, skinIn: Skin, reduced: boolean, pulse = 0, energy = 0) {
+  if (![x, y, r, t, pulse, energy].every(Number.isFinite) || r <= 0) return;
   pulse = Math.max(0, pulse);
+  energy = Math.max(0, Math.min(1, energy));
   const skin = skinColors(skinIn, t);
   if (r < 1.5) {
     ctx.fillStyle = skin.glow; ctx.globalAlpha = 0.3;
@@ -49,13 +50,13 @@ export function drawBlackHole(ctx: CanvasRenderingContext2D, x: number, y: numbe
     ctx.save(); ctx.translate(x, y); ctx.rotate(TILT); ctx.scale(1, FLAT);
     ctx.lineCap = "butt";
     for (const b of bands) {
-      ctx.strokeStyle = b.c; ctx.lineWidth = r * b.w;
+      ctx.strokeStyle = b.c; ctx.lineWidth = r * b.w * (1 + energy * 0.35);
       for (let i = 0; i < segs; i++) {
         const a0 = (front ? 0 : Math.PI) + (i / segs) * Math.PI;
         const a1 = a0 + Math.PI / segs + 0.01;
         const swirl = 0.5 + 0.5 * Math.sin(a0 * 3 - t * b.s * 2.2);
         const doppler = 0.65 + 0.35 * Math.cos(a0);
-        ctx.globalAlpha = b.a * (0.35 + 0.65 * swirl) * doppler * (front ? 1 : 0.8);
+        ctx.globalAlpha = Math.min(1, b.a * (1 + energy * 0.6)) * (0.35 + 0.65 * swirl) * doppler * (front ? 1 : 0.8);
         ctx.beginPath(); ctx.arc(0, 0, r * b.R, a0, a1); ctx.stroke();
       }
     }

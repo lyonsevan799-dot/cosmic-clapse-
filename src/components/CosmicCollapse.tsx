@@ -14,7 +14,7 @@ type Screen = "menu" | "arena-setup" | "eliminated" | "play" | "achievements" | 
 interface Confirm { title: string; body: string; yes: string; onYes: () => void; }
 
 const TUTORIAL = [
-  "Steer with your mouse or WASD. Hold click or Space to boost. Press E to core-strike bigger rivals.",
+  "Steer with your mouse or WASD. Hold click or Space to boost. Press E for a four-second Mass Surge.",
   "Look for objects small enough to absorb — they glow with a ring.",
   "Nearby objects are pulled toward your event horizon.",
   "Every absorption adds mass. Locked objects show a padlock.",
@@ -33,7 +33,7 @@ export default function CosmicCollapse() {
   const pausedRef = useRef(paused); pausedRef.current = paused;
   const [settingsFrom, setSettingsFrom] = useState<"menu" | "pause">("menu");
   const [confirm, setConfirm] = useState<Confirm | null>(null);
-  const [hud, setHud] = useState<HudState>({ mass: 0, time: 0, strikeReady: 1, strikePhase: "ready" });
+  const [hud, setHud] = useState<HudState>({ mass: 0, time: 0, surgePhase: "ready", surgeProgress: 1, surgeRemaining: 0, surgeCooldown: 0 });
   const [toasts, setToasts] = useState<{ id: number; msg: string; ach?: boolean }[]>([]);
   const [tut, setTut] = useState<number | null>(null);
   const tutRef = useRef<{ step: number | null; since: number; flags: Set<string> }>({ step: null, since: 0, flags: new Set() });
@@ -170,7 +170,7 @@ export default function CosmicCollapse() {
               <Button variant="secondary" className="cc-btn" onClick={() => { click(); setScreen("hangar"); }}>Skins</Button>
               <Button variant="secondary" className="cc-btn" onClick={() => { click(); setSettingsFrom("menu"); setScreen("settings"); }}>Settings</Button>
             </div>
-            <p className="mt-2 text-center text-xs text-muted-foreground">Steer with your mouse or WASD · Hold click or Space to boost · E to strike · Esc to pause</p>
+            <p className="mt-2 text-center text-xs text-muted-foreground">Steer with your mouse or WASD · Hold click or Space to boost · E for Mass Surge · Esc to pause</p>
           </div>
         </div>
       )}
@@ -249,9 +249,11 @@ export default function CosmicCollapse() {
               <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Mass</div>
               <div className="font-display text-2xl text-primary sm:text-3xl">{formatMass(hud.mass)}</div>
               <div className="text-[11px] text-muted-foreground">{arenaMode ? `${arenaState.alive} in arena` : `Best ${formatMass(best)}`}</div>
-              {arenaMode && <div className="mt-1.5" aria-label="Core strike cooldown">
-                <div className="mb-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">{hud.strikePhase === "ready" ? "Strike ready" : hud.strikePhase === "charge" ? "Charging…" : hud.strikePhase === "active" ? "Striking!" : "Recharging"}</div>
-                <div className="cc-progress-track"><div className="cc-progress-fill" style={{ width: `${hud.strikeReady * 100}%` }} /></div>
+              {arenaMode && <div className="mt-1.5" aria-label="Mass Surge status">
+                <div className="mb-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
+                  {hud.surgePhase === "ready" ? "Surge ready · E" : hud.surgePhase === "active" ? `Surge · ${hud.surgeRemaining.toFixed(1)}s` : `Recharging · ${Math.ceil(hud.surgeCooldown)}s`}
+                </div>
+                <div className="cc-progress-track"><div className="cc-progress-fill" style={{ width: `${hud.surgeProgress * 100}%` }} /></div>
               </div>}
             </div>
             {!arenaMode && <div className="cc-panel order-3 w-full px-3 py-2 sm:order-none sm:w-auto sm:min-w-[300px]">
@@ -291,8 +293,8 @@ export default function CosmicCollapse() {
             <button type="button" aria-label="Boost" className="cc-joy-base absolute bottom-10 right-8 z-20 flex h-24 w-24 items-center justify-center text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
               onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); engineRef.current?.setBoost(true); }}
               onPointerUp={() => engineRef.current?.setBoost(false)} onPointerCancel={() => engineRef.current?.setBoost(false)} onLostPointerCapture={() => engineRef.current?.setBoost(false)}>BOOST</button>
-            <button type="button" aria-label="Strike" className="cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
-              onPointerDown={(e) => { e.preventDefault(); engineRef.current?.strike(); }}><span style={{ opacity: hud.strikeReady >= 1 ? 1 : 0.45 }}>{hud.strikeReady >= 1 ? "STRIKE" : `${Math.round(hud.strikeReady * 100)}%`}</span></button>
+            <button type="button" aria-label="Mass Surge" className="cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
+              disabled={hud.surgePhase !== "ready"} onPointerDown={(e) => { e.preventDefault(); engineRef.current?.surge(); }}><span style={{ opacity: hud.surgePhase === "ready" ? 1 : 0.55 }}>{hud.surgePhase === "ready" ? "SURGE" : hud.surgePhase === "active" ? `${hud.surgeRemaining.toFixed(1)}s` : `${Math.ceil(hud.surgeCooldown)}s`}</span></button>
           </>)}
 
           {paused && !confirm && (

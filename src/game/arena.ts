@@ -29,8 +29,8 @@ export interface Bot {
   eater: Bot | "player" | null;
   /** Wobble phase for organic movement. */
   wob: number;
-  /** Core-strike ability state. */
-  strike: StrikeState;
+  /** Temporary size-boost ability state. */
+  surge: SurgeState;
 }
 
 export const ARENA = {
@@ -68,73 +68,65 @@ export const MAX_SPEED = 95;
 
 export const BOOST = { mult: 1.65, costPerSec: 0.025, minMass: 25 } as const;
 
-// ---------- core strike: skill-based combat that lets small holes beat big ones ----------
-export const STRIKE = {
-  /** Telegraphed wind-up; the attacker is slowed and glows. */
-  charge: 0.55,
-  /** Lunge window in which the strike can connect. */
-  active: 0.3,
-  cooldown: 6,
-  /** A missed strike leaves the attacker eatable by anyone for this long. */
-  vulnerable: 1.4,
-  /** Hit when the attacker's centre reaches this fraction of the defender's radius. */
-  coreFrac: 0.5,
-  /** Lunge speed multiplier during the active window. */
-  lungeMult: 2.1,
+// ---------- mass surge: a temporary size advantage paid for with continuous mass loss ----------
+export const SURGE = {
+  /** Maximum visual and combat radius multiplier. */
+  radiusMult: 1.6,
+  duration: 4,
+  /** Exponential drain: approximately 3% of the current mass per second. */
+  drainPerSec: 0.03,
+  /** Recharge begins when the four-second effect ends. */
+  cooldown: 8,
+  /** Higher values expand and contract the hole more quickly. */
+  smoothing: 9,
   /** Repeat eliminations of the same victim within this many seconds pay half. */
   farmWindow: 45,
 } as const;
 
-export type StrikePhase = "ready" | "charge" | "active" | "cooldown";
-export interface StrikeState { phase: StrikePhase; t: number; cd: number; vuln: number; dirX: number; dirY: number; }
-export const newStrike = (): StrikeState => ({ phase: "ready", t: 0, cd: 0, vuln: 0, dirX: 1, dirY: 0 });
+export interface SurgeState { active: boolean; t: number; cd: number; scale: number; }
+export const newSurge = (): SurgeState => ({ active: false, t: 0, cd: 0, scale: 1 });
 
-/** Begin the charge-up if the ability is ready and the attacker is not vulnerable. */
-export function tryStrike(s: StrikeState, dirX: number, dirY: number): boolean {
-  if (s.phase !== "ready" || s.vuln > 0) return false;
-  const d = Math.hypot(dirX, dirY);
-  if (d > 0.1) { s.dirX = dirX / d; s.dirY = dirY / d; }
-  s.phase = "charge"; s.t = 0;
+/** Start a surge only when ready; activation never deals direct damage. */
+export function trySurge(s: SurgeState): boolean {
+  if (s.active || s.cd > 0) return false;
+  s.active = true; s.t = 0; s.cd = 0;
   return true;
 }
 
-/** Advance the strike machine. Returns "fired" when the lunge begins, "whiffed" when a miss ends. */
-export function tickStrike(s: StrikeState, dt: number): "fired" | "whiffed" | null {
-  s.cd = Math.max(0, s.cd - dt);
-  s.vuln = Math.max(0, s.vuln - dt);
-  if (s.phase === "ready") return null;
-  s.t += dt;
-  if (s.phase === "charge" && s.t >= STRIKE.charge) { s.phase = "active"; s.t = 0; return "fired"; }
-  if (s.phase === "active" && s.t >= STRIKE.active) {
-    s.phase = "cooldown"; s.t = 0; s.cd = STRIKE.cooldown; s.vuln = STRIKE.vulnerable;
-    return "whiffed";
+/** Advance duration, recharge and smooth radius. Returns "ended" once on expiration. */
+export function tickSurge(s: SurgeState, dt: number): "ended" | null {
+  if (!Number.isFinite(dt) || dt <= 0) return null;
+  const target = s.active ? SURGE.radiusMult : 1;
+  s.scale += (target - s.scale) * (1 - Math.exp(-dt * SURGE.smoothing));
+  s.scale = Math.max(1, Math.min(SURGE.radiusMult, s.scale));
+  if (s.active) {
+    s.t += dt;
+    if (s.t >= SURGE.duration) {
+      s.active = false; s.t = 0; s.cd = SURGE.cooldown;
+      return "ended";
+    }
+  } else {
+    s.cd = Math.max(0, s.cd - dt);
   }
-  if (s.phase === "cooldown" && s.cd <= 0) { s.phase = "ready"; s.t = 0; }
   return null;
 }
 
-/**
- * Defender read of an incoming strike: when an attacker is charging or lunging at us from close range,
- * sidestep perpendicular to its aim. Imperfect on purpose (misses ~40% of reads).
- */
-export function dodgeTarget(x: number, y: number, r: number, ax: number, ay: number, s: StrikeState, rand: () => number) {
-  if (s.phase !== "charge" && s.phase !== "active") return null;
-  const dx = x - ax, dy = y - ay, d = Math.hypot(dx, dy);
-  if (d < 1e-6 || d > Math.max(r * 4, 260)) return null;
-  if ((s.dirX * dx + s.dirY * dy) / d < 0.6 || rand() < 0.4) return null;
-  const side = rand() < 0.5 ? 1 : -1;
-  return { x: x - s.dirY * side * (r * 3 + 120), y: y + s.dirX * side * (r * 3 + 120) };
+/** Frame-rate-independent mass cost shared by the player and every bot. */
+export function drainSurgeMass(mass: number, dt: number): number {
+  if (!Number.isFinite(mass) || mass <= 0 || !Number.isFinite(dt) || dt <= 0) return mass;
+  return mass * Math.exp(-SURGE.drainPerSec * dt);
 }
 
-/** A connected strike goes on cooldown without the vulnerability penalty. */
-export function strikeConnected(s: StrikeState) {
-  if (s.phase === "active" || s.phase === "charge") { s.phase = "cooldown"; s.t = 0; s.cd = STRIKE.cooldown; }
+/** Cubic scaling keeps the normal 1.4× mass rule consistent with boosted radius. */
+export function effectiveMass(mass: number, scale = 1): number {
+  return mass * Math.pow(Math.max(1, scale), 3);
 }
 
-/** The strike connects when the attacker's centre reaches the defender's exposed core. */
-export function strikeHits(ax: number, ay: number, dx: number, dy: number, defenderRadius: number): boolean {
-  return Number.isFinite(defenderRadius) && defenderRadius > 0 &&
-    Math.hypot(ax - dx, ay - dy) <= defenderRadius * STRIKE.coreFrac;
+/** Bots surge for nearby hunts and escapes, never while already active or recharging. */
+export function shouldSurge(s: SurgeState, mode: Bot["mode"], distance: number, radius: number, rand: () => number): boolean {
+  if (s.active || s.cd > 0 || (mode !== "hunt" && mode !== "flee")) return false;
+  const range = mode === "hunt" ? Math.max(radius * 6, 360) : Math.max(radius * 4, 280);
+  return distance <= range && rand() < (mode === "hunt" ? 0.55 : 0.75);
 }
 
 /**
