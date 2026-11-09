@@ -1,0 +1,3 @@
+[{"capability":"code","source":"archive","outcome":"migrate","status":"verified","next_action":"none"},
+{"capability":"schema/records/auth","source":"none detected (localStorage only)","outcome":"n/a","status":"verified","next_action":"none"},
+{"capability":"external providers/endpoints/secrets","source":"none detected","outcome":"n/a","status":"verified","next_action":"none"}]
