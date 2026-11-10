@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { kindAt, topEligibleIndex } from "./data";
-import { addMass, canAbsorb, defaultSave, formatMass, recordAbsorb, unlockAchievements, validateSave } from "./logic";
+import { addMass, canAbsorb, defaultSave, formatMass, recordAbsorb, recordArenaProgress, unlockAchievements, validateSave } from "./logic";
 
 describe("endless rules", () => {
   it("tiny black hole can absorb debris but not a gas giant", () => {
@@ -36,5 +36,19 @@ describe("endless rules", () => {
     expect(s.skin).toBe("horizon");
     expect(s.achievements).toContain("m1e3");
     expect(validateSave("garbage").bestMass).toBe(0);
+  });
+  it("records arena time, mass and rank while preserving legacy progress", () => {
+    const save = { ...defaultSave(), runMass: 555 };
+    const updated = recordArenaProgress(save, 1000, 12, 12, 3);
+    expect(updated.runMass).toBe(555);
+    expect(updated.bestMass).toBe(1000);
+    expect(updated.stats.playTime).toBe(12);
+    expect(updated.stats.bestSurvival).toBe(12);
+    expect(updated.stats.bestRank).toBe(3);
+    expect(updated.achievements).toContain("m1e3");
+    const next = recordArenaProgress(updated, 900, 5, 5, 20);
+    expect(next.stats.playTime).toBe(17);
+    expect(next.stats.bestSurvival).toBe(12);
+    expect(next.stats.bestRank).toBe(3);
   });
 });

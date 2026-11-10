@@ -11,8 +11,9 @@
 - [x] Verify preview and standalone game; package the updated download.
 
 ## Replace Core Strike with Mass Surge
-- [ ] Remove instant-kill/core-strike rules, controls, AI dodges and UI.
-- [ ] Add configurable four-second Mass Surge with smooth 1.6× radius, 3%/s mass drain and cooldown.
-- [ ] Apply boosted size to absorption and teach bots to surge during hunts and escapes.
-- [ ] Add aura, pulse, duration/cooldown indicators and desktop/mobile controls.
-- [ ] Test surge rules and verify live gameplay on desktop and mobile.
+- [x] Remove instant-kill/core-strike rules, controls, AI dodges and UI.
+- [x] Add configurable four-second Mass Surge with smooth 1.6× radius, 3%/s mass drain and cooldown.
+- [x] Apply boosted size to absorption and teach bots to surge during hunts and escapes.
+- [x] Add aura, pulse, duration/cooldown indicators and desktop/mobile controls.
+- [x] Test surge rules and verify live gameplay on desktop and mobile.
+- [x] Restore arena achievement and lifetime-stat tracking while preserving legacy saves.

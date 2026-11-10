@@ -130,11 +130,11 @@ export class Engine {
   setBoost(on: boolean) { this.boostBtn = on; }
   /** Mass Surge: temporary radius and absorption power, paid for with mass. */
   surge() {
-    if (!this.arena || !this.playerAlive || !trySurge(this.pSurge)) return;
+    if (this.mode !== "play" || this.paused || !this.arena || !this.playerAlive || !trySurge(this.pSurge)) return;
     const P = this.player, r = radiusForMass(P.mass);
     this.rings.push({ x: P.x, y: P.y, r, max: r * 3.2, life: 0, dur: 0.55, color: this.skin.hot, width: 4 });
     this.texts.push({ text: "MASS SURGE", life: 0, color: this.skin.hot, big: true });
-    sfx.surgeStart();
+    sfx.surgeStart(); this.emitHud();
   }
   onBlurEv = () => { this.resetInput(); if (this.mode === "play" && !this.paused) this.cb.onBlur?.(); };
   onVis = () => { if (document.hidden) this.onBlurEv(); };
@@ -159,6 +159,7 @@ export class Engine {
     this.particles = [];
     this.player = { x: 0, y: 0, vx: 0, vy: 0, mass, disp: mass };
     this.cam = { x: 0, y: 0, zoom: this.zoomFor(mass) };
+    this.pSurge = newSurge();
     this.time = 0; this.runTime = 0; this.shake = 0; this.flash = 0;
     this.topIdx = topEligibleIndex(mass);
     this.movedDist = 0; this.movedSent = false; this.pulledSent = false;
@@ -318,7 +319,7 @@ export class Engine {
       if (![bot.x, bot.y, bot.vx, bot.vy, bot.mass, bot.disp, bot.tx, bot.ty, bot.respawnT, bot.dieT, bot.dieDur, bot.thinkT, bot.speed, bot.wob].every(Number.isFinite) || bot.mass <= 0 || bot.disp <= 0 || bot.dieDur <= 0) {
         if (import.meta.env.DEV) console.warn("Recovering invalid arena opponent", bot.id);
         Object.assign(bot, { x: 0, y: 0, vx: 0, vy: 0, mass: PLAYER.startMass, disp: PLAYER.startMass,
-          tx: 0, ty: 0, alive: false, dying: false, eater: null, respawnT: 0, dieT: 0, dieDur: 0.6, thinkT: 0, speed: 0.8, wob: 0 });
+          tx: 0, ty: 0, alive: false, dying: false, eater: null, respawnT: 0, dieT: 0, dieDur: 0.6, thinkT: 0, speed: 0.8, wob: 0, surge: newSurge() });
       }
     }
     for (const b of this.bots) if (b.alive) this.botGrid.insert(b);
@@ -355,7 +356,9 @@ export class Engine {
         }
         continue;
       }
-      const r = radiusForMass(bot.mass);
+      if (bot.surge.active) bot.mass = drainSurgeMass(bot.mass, Math.min(dt, Math.max(0, SURGE.duration - bot.surge.t)));
+      tickSurge(bot.surge, dt);
+      const r = radiusForMass(bot.mass) * bot.surge.scale;
       bot.thinkT -= dt;
       if (bot.thinkT <= 0) {
         const react = PERSONALITIES[bot.personality].react;
@@ -367,53 +370,36 @@ export class Engine {
           if (other === bot || ("alive" in other && !other.alive)) continue;
           const d = Math.hypot(other.x - bot.x, other.y - bot.y);
           if (d > r * ARENA.senseMult) continue;
-          if (canEat(other.mass, bot.mass) && d < td) { threat = other; td = d; }
-          if (canEat(bot.mass, other.mass) && d < pd) { prey = other; pd = d; }
+          const otherSurge = other === P ? this.pSurge : (other as Bot).surge;
+          if (this.canTake(other.mass, otherSurge, bot.mass, bot.surge) && d < td) { threat = other; td = d; }
+          if (this.canTake(bot.mass, bot.surge, other.mass, otherSurge) && d < pd) { prey = other; pd = d; }
         }
         const foods: Body[] = []; this.foodGrid.query(bot.x, bot.y, r * ARENA.senseMult, foods);
         let food: Body | null = null, fd = Infinity;
-        for (const b of foods) if (canAbsorb(bot.mass, b.kind)) {
+        for (const b of foods) if (canAbsorb(effectiveMass(bot.mass, bot.surge.scale), b.kind)) {
           const d = Math.hypot(b.x - bot.x, b.y - bot.y) / Math.sqrt(b.mass + 1);
           if (d < fd) { food = b; fd = d; }
         }
         decide(bot, { threat, prey, food }, Math.random, this.worldR);
-        // Bold rivals sometimes gamble on a core strike against a nearby bigger hole.
-        if (threat && td < radiusForMass(threat.mass) * 2.5 && (bot.personality === "aggressive" || bot.personality === "competitive")
-          && Math.random() < 0.2) tryStrike(bot.strike, threat.x - bot.x, threat.y - bot.y);
-        // Read telegraphed strikes aimed at this hole and (imperfectly) sidestep them.
-        for (const o of [...nearby, ...(this.playerAlive ? [P] : [])]) {
-          if (o === bot || ("alive" in o && !o.alive)) continue;
-          const os = o === P ? this.pStrike : (o as Bot).strike;
-          const dodge = dodgeTarget(bot.x, bot.y, r, o.x, o.y, os, Math.random);
-          if (dodge) { bot.tx = dodge.x; bot.ty = dodge.y; break; }
-        }
+        if (shouldSurge(bot.surge, bot.mode, bot.mode === "hunt" ? pd : td, r, Math.random)) trySurge(bot.surge);
       }
       const dx = bot.tx - bot.x, dy = bot.ty - bot.y, d = Math.hypot(dx, dy) || 1;
       const a = Math.atan2(dy, dx) + Math.sin(this.time * 1.4 + bot.wob) * 0.12;
-      const st = bot.strike; tickStrike(st, dt);
-      if (st.phase === "active") { bot.vx = st.dirX * MAX_SPEED * STRIKE.lungeMult; bot.vy = st.dirY * MAX_SPEED * STRIKE.lungeMult; }
-      else {
-        const speed = MAX_SPEED * Math.min(0.95, bot.speed) * (st.phase === "charge" ? 0.5 : 1);
-        const inp = Math.min(1, d / (r * 3));
-        steer(bot, Math.cos(a) * inp, Math.sin(a) * inp, speed, dt);
-      }
+      const speed = MAX_SPEED * Math.min(0.95, bot.speed);
+      const inp = Math.min(1, d / (r * 3));
+      steer(bot, Math.cos(a) * inp, Math.sin(a) * inp, speed, dt);
       bot.x += bot.vx * dt; bot.y += bot.vy * dt; this.clampToArena(bot);
       bot.disp = Math.exp(Math.log(bot.disp) + (Math.log(bot.mass) - Math.log(bot.disp)) * (1 - Math.exp(-dt * 4)));
       const nearby: Bot[] = []; this.botGrid.query(bot.x, bot.y, r * 3, nearby);
       for (const other of nearby) {
         if (other === bot || !other.alive || !bot.alive) continue;
-        const od = Math.hypot(bot.x - other.x, bot.y - other.y), orad = radiusForMass(other.mass);
-        if (st.phase === "active" && strikeHits(bot.x, bot.y, other.x, other.y, orad)) { strikeConnected(st); this.eatBot(other, bot); }
-        else if (this.canTake(bot.mass, other.mass, other.strike) && od < r * 0.95 + orad * 0.35) this.eatBot(other, bot);
+        const od = Math.hypot(bot.x - other.x, bot.y - other.y), orad = radiusForMass(other.mass) * other.surge.scale;
+        if (this.canTake(bot.mass, bot.surge, other.mass, other.surge) && od < r * 0.95 + orad * 0.35) this.eatBot(other, bot);
       }
       if (this.playerAlive && bot.alive) {
-        const distance = Math.hypot(bot.x - P.x, bot.y - P.y), prad = radiusForMass(P.mass);
-        const botHits = st.phase === "active" && strikeHits(bot.x, bot.y, P.x, P.y, prad);
-        const playerHits = this.pStrike.phase === "active" && strikeHits(P.x, P.y, bot.x, bot.y, r);
-        if (playerHits) { strikeConnected(this.pStrike); this.eatBot(bot, "player"); sfx.strikeHit(); this.shake = Math.max(this.shake, 0.6); this.emit(bot.x, bot.y, 26, this.skin.hot, r * this.cam.zoom * 0.25, 260); this.texts.push({ text: "CORE STRIKE!", life: 0, color: this.skin.hot, big: true }); }
-        else if (this.canTake(P.mass, bot.mass, st) && distance < prad * 0.95 + r * 0.35) this.eatBot(bot, "player");
-        else if (botHits || (this.canTake(bot.mass, P.mass, this.pStrike) && distance < r * 0.95 + prad * 0.35)) {
-          if (botHits) strikeConnected(st);
+        const distance = Math.hypot(bot.x - P.x, bot.y - P.y), prad = radiusForMass(P.mass) * this.pSurge.scale;
+        if (this.canTake(P.mass, this.pSurge, bot.mass, bot.surge) && distance < prad * 0.95 + r * 0.35) this.eatBot(bot, "player");
+        else if (this.canTake(bot.mass, bot.surge, P.mass, this.pSurge) && distance < r * 0.95 + prad * 0.35) {
           this.playerAlive = false; this.playerKiller = bot; this.playerDieT = 0; this.resetInput();
           this.cb.onKill?.(`${bot.name} absorbed You`);
         }
@@ -480,24 +466,24 @@ export class Engine {
       ix = Math.cos(this.demoDir) * 0.55; iy = Math.sin(this.demoDir) * 0.55;
     }
     const il = Math.hypot(ix, iy); if (il > 1) { ix /= il; iy /= il; }
+    if (this.arena && this.playerAlive) {
+      if (this.pSurge.active) P.mass = drainSurgeMass(P.mass, Math.min(dt, Math.max(0, SURGE.duration - this.pSurge.t)));
+      if (tickSurge(this.pSurge, dt) === "ended") sfx.surgeEnd();
+    }
     // smooth visual growth (in log space so huge jumps stay smooth)
     const lg = Math.log(Math.max(1, P.disp)), lt = Math.log(Math.max(1, P.mass));
     P.disp = Math.exp(lg + (lt - lg) * (1 - Math.exp(-dt * 4)));
-    const pr = radiusForMass(P.disp);
+    const pr = radiusForMass(P.disp) * (this.arena ? this.pSurge.scale : 1);
     const wantBoost = playing && this.playerAlive && (this.keys.has("space") || this.mouse.down || this.boostBtn) && Math.hypot(ix, iy) > 0.05;
     this.boosting = wantBoost && P.mass > BOOST.minMass;
-    const ps = this.pStrike;
-    if (this.arena && tickStrike(ps, dt) === "whiffed") sfx.strikeMiss();
-    if (ps.phase === "charge") this.boosting = false;
-    const maxSpeed = (this.arena ? MAX_SPEED : PLAYER.speedPerRadius * pr) * (this.boosting ? BOOST.mult : 1) * (this.arena && ps.phase === "charge" ? 0.5 : 1);
+    const maxSpeed = (this.arena ? MAX_SPEED : PLAYER.speedPerRadius * pr) * (this.boosting ? BOOST.mult : 1);
     if (this.boosting) {
       // boosting burns mass, shed as a glowing trail (slither.io)
       P.mass = Math.max(BOOST.minMass, P.mass * (1 - BOOST.costPerSec * dt));
       this.shedT -= dt;
       if (this.shedT <= 0) { this.shedT = 0.05; this.emit(P.x - P.vx * 0.05, P.y - P.vy * 0.05, 2, this.skin.glow, pr * this.cam.zoom * 0.18, 30); }
     }
-    if (this.arena && ps.phase === "active") { P.vx = ps.dirX * MAX_SPEED * STRIKE.lungeMult; P.vy = ps.dirY * MAX_SPEED * STRIKE.lungeMult; }
-    else if (this.arena) steer(P, ix, iy, maxSpeed, dt);
+    if (this.arena) steer(P, ix, iy, maxSpeed, dt);
     else {
       const rate = il > 0.05 ? PLAYER.accel : PLAYER.decel;
       const f = 1 - Math.exp(-dt * rate);
@@ -521,7 +507,7 @@ export class Engine {
     const gravR = pr * PLAYER.gravityMult;
     const vr = this.viewRadius();
     const z = this.cam.zoom;
-    const botSenseRadius = this.arena ? this.bots.reduce((max, bot) => bot.alive ? Math.max(max, radiusForMass(bot.mass) * PLAYER.gravityMult) : max, 0) : 0;
+    const botSenseRadius = this.arena ? this.bots.reduce((max, bot) => bot.alive ? Math.max(max, radiusForMass(bot.mass) * bot.surge.scale * PLAYER.gravityMult) : max, 0) : 0;
     let eligibleCount = 0;
     for (const b of this.bodies) {
       if (![b.x, b.y, b.vx, b.vy, b.r, b.mass, b.rot, b.spin, b.t, b.dur].every(Number.isFinite) || b.r <= 0 || b.mass <= 0 || b.dur <= 0) {
@@ -546,19 +532,19 @@ export class Engine {
       }
       let owner: Bot | typeof P | null = this.playerAlive ? P : null;
       if (this.arena) {
-        let nearest = owner && canAbsorb(P.mass, b.kind) ? Math.hypot(P.x - b.x, P.y - b.y) / pr : Infinity;
+        let nearest = owner && canAbsorb(effectiveMass(P.mass, this.arena ? this.pSurge.scale : 1), b.kind) ? Math.hypot(P.x - b.x, P.y - b.y) / pr : Infinity;
         const nearby: Bot[] = []; this.botGrid.query(b.x, b.y, botSenseRadius + b.r, nearby);
-        for (const bot of nearby) if (bot.alive && canAbsorb(bot.mass, b.kind)) {
-          const r = radiusForMass(bot.mass), d = Math.hypot(bot.x - b.x, bot.y - b.y);
+        for (const bot of nearby) if (bot.alive && canAbsorb(effectiveMass(bot.mass, bot.surge.scale), b.kind)) {
+          const r = radiusForMass(bot.mass) * bot.surge.scale, d = Math.hypot(bot.x - b.x, bot.y - b.y);
           if (d < r * PLAYER.gravityMult + b.r && d / r < nearest) { owner = bot; nearest = d / r; }
         }
       }
       const target = owner ?? P;
-      const ownerR = owner && "alive" in owner ? radiusForMass(owner.disp) : pr;
+      const ownerR = owner && "alive" in owner ? radiusForMass(owner.disp) * owner.surge.scale : pr;
       const ownerGrav = ownerR * PLAYER.gravityMult;
       const dx = target.x - b.x, dy = target.y - b.y;
       const d = Math.hypot(dx, dy) || 1e-9;
-      b.eligible = !!owner && canAbsorb(target.mass, b.kind);
+      b.eligible = !!owner && canAbsorb(effectiveMass(target.mass, owner && "surge" in owner ? owner.surge.scale : this.arena ? this.pSurge.scale : 1), b.kind);
       if (b.eligible) eligibleCount++;
       b.inField = !!owner && d < ownerGrav + b.r;
       if (b.inField && b.eligible) {
@@ -586,7 +572,7 @@ export class Engine {
     let localFood = -1;
     while (this.bodies.length < (this.arena ? ARENA.density : PLAYER.density) && n++ < 5) {
       if (this.arena) {
-        if (localFood < 0) { localFood = 0; for (const b of this.bodies) if (!b.absorbing && canAbsorb(P.mass, b.kind) && Math.abs(b.x - P.x) < vr && Math.abs(b.y - P.y) < vr) localFood++; }
+        if (localFood < 0) { localFood = 0; for (const b of this.bodies) if (!b.absorbing && canAbsorb(effectiveMass(P.mass, this.arena ? this.pSurge.scale : 1), b.kind) && Math.abs(b.x - P.x) < vr && Math.abs(b.y - P.y) < vr) localFood++; }
         this.spawnArenaFood(localFood++ < 25);
       } else this.spawn(false, eligibleCount < PLAYER.density * 0.45);
     }
@@ -749,7 +735,7 @@ export class Engine {
     const sx = this.shake > 0.2 ? (Math.random() - 0.5) * this.shake : 0;
     const sy = this.shake > 0.2 ? (Math.random() - 0.5) * this.shake : 0;
     const cx = w / 2 - this.cam.x * z + sx, cy = h / 2 - this.cam.y * z + sy;
-    const P = this.player; const pr = radiusForMass(P.disp);
+    const P = this.player; const pr = radiusForMass(P.disp) * (this.arena ? this.pSurge.scale : 1);
     const px = cx + P.x * z, py = cy + P.y * z;
     const gravR = pr * PLAYER.gravityMult;
     const red = this.cfg.settings.reduced;
@@ -762,7 +748,7 @@ export class Engine {
     ctx.setLineDash([]); ctx.globalAlpha = 1;
 
     for (const b of this.bodies) {
-      const playerEligible = canAbsorb(P.mass, b.kind);
+      const playerEligible = canAbsorb(effectiveMass(P.mass, this.arena ? this.pSurge.scale : 1), b.kind);
       let bx = cx + b.x * z, by = cy + b.y * z;
       const pad = b.sprite ? b.sprite.pad : 3;
       const br = b.r * z;
@@ -845,10 +831,10 @@ export class Engine {
       for (const bot of this.bots) {
         if (!bot.alive && !bot.dying) continue;
         const bx = cx + bot.x * z, by = cy + bot.y * z;
-        const r = radiusForMass(bot.disp) * z * (bot.dying ? Math.max(0.06, 1 - bot.dieT / bot.dieDur) : 1);
+        const r = radiusForMass(bot.disp) * bot.surge.scale * z * (bot.dying ? Math.max(0.06, 1 - bot.dieT / bot.dieDur) : 1);
         if (bx < -r * 4 || bx > w + r * 4 || by < -r * 4 || by > h + r * 4) continue;
-        drawBlackHole(ctx, bx, by, r, t + bot.wob, bot.skin, red);
-        if (bot.alive && r > 2 && bot.strike.phase !== "ready" && bot.strike.phase !== "cooldown") this.strikeRing(bx, by, r, bot.strike, "#ff5a5a");
+        drawBlackHole(ctx, bx, by, r, t + bot.wob, bot.skin, red, 0, (bot.surge.scale - 1) / (SURGE.radiusMult - 1));
+        if (bot.alive && r > 2) this.surgeAura(bx, by, r, bot.surge, bot.skin.hot);
         if (bot.alive && r > 3) {
           ctx.textAlign = "center"; ctx.font = "600 11px Sora, system-ui, sans-serif";
           ctx.fillStyle = bot.skin.mid; ctx.fillText(bot.name, bx, by - r * 2 - 6);
@@ -856,8 +842,8 @@ export class Engine {
       }
     }
     const playerScale = this.arena && !this.playerAlive ? Math.max(0.02, 1 - this.playerDieT / 0.65) : 1;
-    drawBlackHole(ctx, px, py, prS * playerScale * (1 + this.pulse * 0.06), t, this.skin, red, this.pulse * 0.6 + grand * 0.8);
-    if (this.arena && this.playerAlive) this.strikeRing(px, py, prS, this.pStrike, this.skin.hot);
+    drawBlackHole(ctx, px, py, prS * playerScale * (1 + this.pulse * 0.06), t, this.skin, red, this.pulse * 0.6 + grand * 0.8, (this.pSurge.scale - 1) / (SURGE.radiusMult - 1));
+    if (this.arena && this.playerAlive) this.surgeAura(px, py, prS, this.pSurge, this.skin.hot);
     if (this.arena && this.playerAlive) { ctx.textAlign = "center"; ctx.font = "700 12px Sora, system-ui, sans-serif"; ctx.fillStyle = this.skin.hot; ctx.fillText("You", px, py - prS * 2 - 8); }
 
     ctx.textAlign = "center";

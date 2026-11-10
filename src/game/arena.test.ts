@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
-  ARENA, PERSONALITY_LIST, STRIKE, botStartMass, canEat, computeLeaderboard, decide, eliminationReward,
-  makeBotName, newStrike, pickPersonality, spawnPosAwayFrom, strikeConnected, strikeHits, tickStrike,
-  tryStrike, SpatialGrid, type Bot,
+  ARENA, PERSONALITY_LIST, SURGE, botStartMass, canEat, computeLeaderboard, decide, eliminationReward,
+  makeBotName, newSurge, pickPersonality, spawnPosAwayFrom, tickSurge, drainSurgeMass, effectiveMass, shouldSurge,
+  trySurge, SpatialGrid, type Bot,
 } from "./arena";
 import { SKINS } from "./data";
 
@@ -15,7 +15,7 @@ const testBot = (over: Partial<Bot> = {}): Bot => ({
   id: 0, name: "TestBot", skin: SKINS[0], x: 0, y: 0, vx: 0, vy: 0, mass: 100, disp: 100,
   personality: "balanced", speed: 1, thinkT: 0, mode: "wander", tx: 0, ty: 0, foodRef: null,
   alive: true, respawnT: 0, dying: false, dieT: 0, dieDur: 0.6, eater: null, wob: 0,
-  strike: newStrike(), ...over,
+  surge: newSurge(), ...over,
 });
 
 describe("arena rules", () => {
@@ -111,5 +111,46 @@ describe("arena rules", () => {
     const out: { x: number; y: number }[] = [];
     grid.query(0, 0, 1e100, out);
     expect(out).toHaveLength(2);
+  });
+});
+
+describe("Mass Surge rules", () => {
+  it("runs for four seconds then recharges for eight seconds", () => {
+    const s = newSurge();
+    expect(trySurge(s)).toBe(true);
+    tickSurge(s, 3.99); expect(s.active).toBe(true);
+    expect(tickSurge(s, 0.01)).toBe("ended");
+    expect(s.cd).toBeCloseTo(8); expect(trySurge(s)).toBe(false);
+    tickSurge(s, 7.99); expect(trySurge(s)).toBe(false);
+    tickSurge(s, 0.01); expect(trySurge(s)).toBe(true);
+  });
+  it("smoothly expands to 1.6 times radius and contracts after expiration", () => {
+    const s = newSurge(); trySurge(s); tickSurge(s, 0.01);
+    expect(s.scale).toBeGreaterThan(1); expect(s.scale).toBeLessThan(1.6);
+    tickSurge(s, 3.99); expect(s.scale).toBeCloseTo(1.6, 6);
+    tickSurge(s, 1); expect(s.scale).toBeCloseTo(1, 3);
+  });
+  it("drains current mass at a frame-independent three percent per second", () => {
+    expect(drainSurgeMass(100, 1)).toBeCloseTo(100 * Math.exp(-0.03), 8);
+    let mass = 100;
+    for (let i = 0; i < 240; i++) mass = drainSurgeMass(mass, 1 / 60);
+    expect(mass).toBeCloseTo(100 * Math.exp(-0.12), 8);
+  });
+  it("applies boosted size to absorption without instant kills", () => {
+    expect(canEat(40, 100)).toBe(false);
+    expect(canEat(effectiveMass(40, 1.6), 100)).toBe(true);
+    expect(canEat(effectiveMass(40, 1.6), 800)).toBe(false);
+    expect(canEat(effectiveMass(40, 1.6), effectiveMass(100, 1.6))).toBe(false);
+  });
+  it("bots surge for nearby hunts and escapes, not for food or cooldown", () => {
+    expect(shouldSurge(newSurge(), "hunt", 200, 30, () => 0)).toBe(true);
+    expect(shouldSurge(newSurge(), "flee", 200, 30, () => 0)).toBe(true);
+    expect(shouldSurge(newSurge(), "food", 1, 30, () => 0)).toBe(false);
+    expect(shouldSurge({ ...newSurge(), cd: 8 }, "hunt", 1, 30, () => 0)).toBe(false);
+  });
+  it("handles elapsed time across both duration and cooldown", () => {
+    const s = newSurge(); trySurge(s); tickSurge(s, 5);
+    expect(s.active).toBe(false); expect(s.cd).toBe(7);
+    expect(SURGE.duration).toBe(4);
   });
 });

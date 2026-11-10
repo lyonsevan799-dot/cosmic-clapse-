@@ -15,4 +15,4 @@
 - Package standalone exports from a temporary Vite client entry that mounts the existing game, leaving TanStack Start routing and deployment unchanged.
 - Keep respawn geometry and sparse-grid bounds in pure arena helpers; use asymptotic camera zoom and guarded rendering so late-game stability never depends on reducing player mass.
 
-- Core-strike rules (timing, dodge reads, lunge contact immunity) live as pure helpers in src/game/arena.ts so combat stays unit-testable.
+- Mass Surge timing, drain, absorption scaling and AI activation live as pure helpers in src/game/arena.ts so human and bot combat share testable rules.

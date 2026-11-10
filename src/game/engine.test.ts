@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Engine } from "./engine";
 import { PLAYER, kindAt } from "./data";
-import { ARENA, dodgeTarget, newStrike, tryStrike } from "./arena";
+import { ARENA, SURGE, trySurge } from "./arena";
 import { MAX_RADIUS, addMass, radiusForMass } from "./logic";
 
 vi.mock("./audio", () => ({ sfx: new Proxy({}, { get: () => vi.fn() }) }));
@@ -134,41 +134,42 @@ describe("arena simulation", () => {
     expect(onArena.mock.lastCall?.[0].rank).toBe(1);
   });
 });
-describe("core strike", () => {
-  const duel = (playerMass: number, rivalMass: number, gap: number) => {
-    engine.startArena(10); engine.bodies = [];
-    for (const b of engine.bots) { b.x = engine.worldR * 0.8; b.y = b.id * 100; b.mass = b.disp = 10; }
-    const P = engine.player; P.mass = P.disp = playerMass; P.vx = P.vy = 0;
-    const rival = engine.bots[0]; rival.mass = rival.disp = rivalMass;
-    rival.x = P.x + radiusForMass(rivalMass) + gap; rival.y = P.y; rival.thinkT = 99; rival.tx = rival.x; rival.ty = rival.y;
-    return rival;
+describe("Mass Surge simulation", () => {
+  const isolated = (mass = 100) => {
+    engine.startArena(10); engine.bots = []; engine.bodies = [];
+    vi.spyOn(engine as unknown as { spawnArenaFood: () => void }, "spawnArenaFood").mockImplementation(() => {});
+    engine.player.mass = engine.player.disp = mass;
   };
-  it.each([[40, 40], [40, 200], [40, 800]])("a %s-mass player core-strikes a %s-mass rival", (pm, rm) => {
-    const rival = duel(pm, rm, 20);
-    engine.strike(); tick(engine, 1.2);
-    expect(rival.alive).toBe(false); expect(engine.playerAlive).toBe(true);
-    tick(engine, 1);
-    expect(engine.player.mass).toBeGreaterThan(pm + rm * 0.45);
+  it("drains only the four active seconds and never lunges", () => {
+    isolated(); engine.surge(); tick(engine, 5);
+    expect(engine.player.mass).toBeCloseTo(100 * Math.exp(-0.12), 6);
+    expect(engine.pSurge.active).toBe(false);
+    expect(engine.pSurge.cd).toBeGreaterThan(6.9);
+    expect(engine.player.vx).toBe(0);
   });
-  it("two large holes: a strike still beats an equal giant", () => {
-    const rival = duel(1e6, 1e6, -radiusForMass(1e6) * 0.5 + 20);
-    engine.strike(); tick(engine, 1.2);
-    expect(rival.alive).toBe(false); expect(engine.playerAlive).toBe(true);
+  it("rejects surge while paused and resets it for the next run", () => {
+    isolated(); engine.pause(); engine.surge(); expect(engine.pSurge.active).toBe(false);
+    engine.resume(); engine.surge(); expect(engine.pSurge.active).toBe(true);
+    engine.startArena(10); expect(engine.pSurge.scale).toBe(1); expect(engine.pSurge.active).toBe(false);
   });
-  it("a large rival reads a telegraphed strike and sidesteps", () => {
-    const s = newStrike(); tryStrike(s, 1, 0);
-    const dodge = dodgeTarget(100, 0, 40, 0, 0, s, () => 0.9);
-    expect(dodge).not.toBeNull(); expect(Math.abs(dodge!.y)).toBeGreaterThan(200);
-    expect(dodgeTarget(100, 0, 40, 0, 0, newStrike(), () => 0.9)).toBeNull();
-  });
-  it("a missed strike leaves the player vulnerable to a slightly bigger rival", () => {
-    engine.startArena(10); engine.bodies = [];
-    for (const b of engine.bots) { b.x = engine.worldR * 0.8; b.y = b.id * 100; }
-    engine.strike(); tick(engine, 0.9);
-    expect(engine.pStrike.vuln).toBeGreaterThan(0);
-    const r = engine.bots[0]; r.mass = r.disp = engine.player.mass * 1.1; r.x = engine.player.x; r.y = engine.player.y; r.thinkT = 99;
+  it("absorbs a normally larger rival using boosted contact size", () => {
+    engine.startArena(10); engine.bodies = []; engine.bots = engine.bots.slice(0, 1);
+    const rival = engine.bots[0]; rival.mass = rival.disp = 100;
+    rival.x = 1000; rival.y = 0; rival.tx = 1000; rival.ty = 0; rival.thinkT = 99;
+    engine.player.mass = engine.player.disp = 40;
+    engine.surge(); tick(engine, 0.5);
+    rival.x = engine.player.x; rival.y = engine.player.y;
     tick(engine, 0.8);
-    expect(engine.playerAlive).toBe(false);
+    expect(rival.alive).toBe(false); expect(engine.playerAlive).toBe(true);
+    expect(engine.player.mass).toBeGreaterThan(40);
+  });
+  it("bots pay the same mass cost and receive the same radius boost", () => {
+    engine.startArena(10); engine.bodies = []; engine.bots = engine.bots.slice(0, 1);
+    const bot = engine.bots[0]; bot.x = bot.tx = 1500; bot.y = bot.ty = 0; bot.thinkT = 99;
+    vi.spyOn(engine as unknown as { spawnArenaFood: () => void }, "spawnArenaFood").mockImplementation(() => {});
+    bot.mass = bot.disp = 100; trySurge(bot.surge); tick(engine, 1);
+    expect(bot.mass).toBeCloseTo(100 * Math.exp(-SURGE.drainPerSec), 5);
+    expect(bot.surge.scale).toBeCloseTo(1.6, 3);
   });
 });
 describe("constant speed", () => {

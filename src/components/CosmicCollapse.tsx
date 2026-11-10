@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { Engine, type HudState } from "@/game/engine";
 import { ACHIEVEMENTS, CATALOG_SIZE, PLAYER, SKINS, kindAt } from "@/game/data";
 import {
-  defaultSave, formatMass, loadSave, nextAchievement, recordAbsorb, skinOwned, storageAvailable,
+  defaultSave, formatMass, loadSave, nextAchievement, recordAbsorb, recordArenaProgress, skinOwned, storageAvailable,
   unlockAchievements, writeSave, type SaveData,
 } from "@/game/logic";
 import { sfx } from "@/game/audio";
@@ -53,9 +53,13 @@ export default function CosmicCollapse() {
   }, []);
   /** Persist run mass + play time from the engine. */
   const flush = useCallback(() => {
-    const e = engineRef.current; if (!e || e.mode !== "play" || e.arena) return;
+    const e = engineRef.current; if (!e || e.mode !== "play") return;
     const dtp = Math.max(0, e.runTime - lastTime.current); lastTime.current = e.runTime;
     const s = saveRef.current;
+    if (e.arena) {
+      commit(recordArenaProgress(s, e.player.mass, dtp, e.runTime, s.stats.bestRank));
+      return;
+    }
     commit({ ...s, runMass: e.player.mass, bestMass: Math.max(s.bestMass, e.player.mass), stats: { ...s.stats, playTime: s.stats.playTime + dtp } });
   }, [commit]);
 
@@ -63,15 +67,24 @@ export default function CosmicCollapse() {
     const canvas = canvasRef.current; if (!canvas) return;
     const e = new Engine(canvas, {
       onHud: setHud,
-      onArena: setArenaState,
-      onKill: (message) => setFeed((old) => [...old.slice(-2), message]),
-      onEliminated: (name) => { setKiller(name); setPaused(false); setScreen("eliminated"); },
+      onArena: (state) => {
+        setArenaState(state);
+        saveRef.current = { ...saveRef.current, stats: { ...saveRef.current.stats, bestRank: Math.min(saveRef.current.stats.bestRank, state.rank) } };
+        dirty.current = true;
+      },
+      onKill: (message) => {
+        setFeed((old) => [...old.slice(-2), message]);
+        if (message.startsWith("You absorbed ")) {
+          saveRef.current = { ...saveRef.current, stats: { ...saveRef.current.stats, opponents: saveRef.current.stats.opponents + 1 } };
+          dirty.current = true;
+        }
+      },
+      onEliminated: (name) => { flush(); setKiller(name); setPaused(false); setScreen("eliminated"); },
       onPauseRequest: () => { if (!pausedRef.current) doPause(); else if (screenRef.current === "play") doResume(); },
       onBlur: () => doPause(),
       onToast: (m) => toast(m),
       onTutorial: (ev) => { tutRef.current.flags.add(ev); },
       onAbsorb: (kind, _gain, mass) => {
-        if (engineRef.current?.arena) return;
         let s = { ...saveRef.current, stats: recordAbsorb(saveRef.current.stats, kind) };
         const r = unlockAchievements(s, mass); s = r.save;
         saveRef.current = s; dirty.current = true;
@@ -132,7 +145,7 @@ export default function CosmicCollapse() {
   };
   const startArena = () => {
     flush(); setArenaMode(true); setPaused(false); setConfirm(null); setFeed([]); setTutStep(null);
-    engineRef.current?.startArena(saveRef.current.settings.botCount); setScreen("play");
+    engineRef.current?.startArena(saveRef.current.settings.botCount); lastTime.current = 0; setScreen("play");
   };
   const moveJoystick = useCallback((x: number, y: number) => engineRef.current?.setJoystick(x, y), []);
   const toMenu = () => { flush(); engineRef.current?.startDemo(); setPaused(false); setTutStep(null); setConfirm(null); setScreen("menu"); };
@@ -149,7 +162,7 @@ export default function CosmicCollapse() {
     <div className="fixed inset-0 overflow-hidden bg-background text-foreground" style={{ touchAction: "none" }}>
       <canvas ref={canvasRef} className="absolute inset-0 block" aria-label="Game view" />
 
-      <div className="pointer-events-none absolute left-1/2 top-28 z-40 flex -translate-x-1/2 flex-col items-center gap-2 px-4">
+      <div className="pointer-events-none absolute inset-x-4 top-4 z-40 flex flex-col items-center gap-2 sm:top-28">
         {toasts.map((t) => (
           <div key={t.id} className={`cc-toast cc-panel px-4 py-2 text-center text-sm font-semibold ${t.ach ? "cc-highlight text-gold" : ""}`}>{t.msg}</div>
         ))}
@@ -229,6 +242,9 @@ export default function CosmicCollapse() {
             <Stat label="Stars absorbed" value={formatMass(save.stats.stars)} />
             <Stat label="Galaxies absorbed" value={formatMass(save.stats.galaxies)} />
             <Stat label="Play time" value={fmtTime(save.stats.playTime)} />
+            <Stat label="Rivals absorbed" value={formatMass(save.stats.opponents)} />
+            <Stat label="Longest survival" value={fmtTime(save.stats.bestSurvival)} />
+            <Stat label="Best arena rank" value={save.stats.bestRank === 101 ? "—" : `#${save.stats.bestRank}`} />
             <Stat label="Achievements" value={`${save.achievements.length}/${ACHIEVEMENTS.length}`} />
           </div>
         </Page>
@@ -268,10 +284,10 @@ export default function CosmicCollapse() {
             </div>
           </div>
 
-          {arenaMode && <div className="cc-panel absolute right-3 top-24 z-20 w-44 px-3 py-2 sm:right-4 sm:w-56">
+          {arenaMode && <div className="cc-panel absolute right-3 top-36 z-20 w-44 px-3 py-2 sm:right-4 sm:top-24 sm:w-56">
             <div className="mb-2 flex justify-between text-xs font-semibold"><span>Leaderboard</span><span className="text-primary">#{arenaState.rank}</span></div>
             <ol className="space-y-1 text-[10px] sm:text-xs">{arenaState.leaders.map((entry, i) => (
-              <li key={entry.name} className={`flex items-center gap-1 ${entry.isPlayer ? "font-bold text-primary" : "text-muted-foreground"}`}>
+              <li key={entry.name} className={`${i >= 5 ? "hidden sm:flex" : "flex"} items-center gap-1 ${entry.isPlayer ? "font-bold text-primary" : "text-muted-foreground"}`}>
                 <span className="w-4 shrink-0">{i + 1}</span><span className="min-w-0 flex-1 truncate">{entry.name}</span><span>{formatMass(entry.mass)}</span>
               </li>
             ))}</ol>
@@ -290,11 +306,11 @@ export default function CosmicCollapse() {
 
           {coarse && !paused && <Joystick onMove={moveJoystick} />}
           {coarse && !paused && (<>
-            <button type="button" aria-label="Boost" className="cc-joy-base absolute bottom-10 right-8 z-20 flex h-24 w-24 items-center justify-center text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
+            <Button variant="ghost" type="button" aria-label="Boost" className="cc-joy-base absolute bottom-10 right-8 z-20 flex h-24 w-24 items-center justify-center rounded-full text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
               onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); engineRef.current?.setBoost(true); }}
-              onPointerUp={() => engineRef.current?.setBoost(false)} onPointerCancel={() => engineRef.current?.setBoost(false)} onLostPointerCapture={() => engineRef.current?.setBoost(false)}>BOOST</button>
-            <button type="button" aria-label="Mass Surge" className="cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
-              disabled={hud.surgePhase !== "ready"} onPointerDown={(e) => { e.preventDefault(); engineRef.current?.surge(); }}><span style={{ opacity: hud.surgePhase === "ready" ? 1 : 0.55 }}>{hud.surgePhase === "ready" ? "SURGE" : hud.surgePhase === "active" ? `${hud.surgeRemaining.toFixed(1)}s` : `${Math.ceil(hud.surgeCooldown)}s`}</span></button>
+              onPointerUp={() => engineRef.current?.setBoost(false)} onPointerCancel={() => engineRef.current?.setBoost(false)} onLostPointerCapture={() => engineRef.current?.setBoost(false)}>BOOST</Button>
+            <Button variant="ghost" type="button" aria-label="Mass Surge" className="cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center rounded-full text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
+              disabled={hud.surgePhase !== "ready"} onClick={() => engineRef.current?.surge()}><span>{hud.surgePhase === "ready" ? "SURGE" : hud.surgePhase === "active" ? `${hud.surgeRemaining.toFixed(1)}s` : `${Math.ceil(hud.surgeCooldown)}s`}</span></Button>
           </>)}
 
           {paused && !confirm && (

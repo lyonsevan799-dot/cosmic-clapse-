@@ -118,6 +118,19 @@ export function recordAbsorb(stats: LifetimeStats, kind: Kind): LifetimeStats {
   };
 }
 
+/** Track arena records without overwriting the legacy resumable run. */
+export function recordArenaProgress(save: SaveData, mass: number, elapsed: number, survival: number, rank: number): SaveData {
+  return unlockAchievements({
+    ...save,
+    stats: {
+      ...save.stats,
+      playTime: save.stats.playTime + Math.max(0, elapsed),
+      bestSurvival: Math.max(save.stats.bestSurvival, survival),
+      bestRank: Math.min(save.stats.bestRank, rank),
+    },
+  }, mass).save;
+}
+
 /** Unlock all achievements met by `mass` (and First Bite once anything is absorbed). Each unlocks only once. */
 export function unlockAchievements(save: SaveData, mass: number) {
   const best = Math.max(save.bestMass, Math.min(MAX_MASS, Number.isFinite(mass) ? mass : MAX_MASS));

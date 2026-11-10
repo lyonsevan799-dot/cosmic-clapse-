@@ -96,17 +96,24 @@ export function trySurge(s: SurgeState): boolean {
 /** Advance duration, recharge and smooth radius. Returns "ended" once on expiration. */
 export function tickSurge(s: SurgeState, dt: number): "ended" | null {
   if (!Number.isFinite(dt) || dt <= 0) return null;
-  const target = s.active ? SURGE.radiusMult : 1;
-  s.scale += (target - s.scale) * (1 - Math.exp(-dt * SURGE.smoothing));
-  s.scale = Math.max(1, Math.min(SURGE.radiusMult, s.scale));
+  const smooth = (target: number, elapsed: number) => {
+    s.scale += (target - s.scale) * (1 - Math.exp(-elapsed * SURGE.smoothing));
+    s.scale = Math.max(1, Math.min(SURGE.radiusMult, s.scale));
+  };
   if (s.active) {
+    const remaining = Math.max(0, SURGE.duration - s.t);
+    smooth(SURGE.radiusMult, Math.min(dt, remaining));
     s.t += dt;
-    if (s.t >= SURGE.duration) {
-      s.active = false; s.t = 0; s.cd = SURGE.cooldown;
+    if (s.t >= SURGE.duration - 1e-9) {
+      const overflow = Math.max(0, dt - remaining);
+      s.active = false; s.t = 0; s.cd = Math.max(0, SURGE.cooldown - overflow);
+      smooth(1, overflow);
       return "ended";
     }
   } else {
+    smooth(1, dt);
     s.cd = Math.max(0, s.cd - dt);
+    if (s.cd < 1e-9) s.cd = 0;
   }
   return null;
 }
