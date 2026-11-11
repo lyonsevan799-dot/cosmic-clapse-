@@ -17,3 +17,8 @@
 - [x] Add aura, pulse, duration/cooldown indicators and desktop/mobile controls.
 - [x] Test surge rules and verify live gameplay on desktop and mobile.
 - [x] Restore arena achievement and lifetime-stat tracking while preserving legacy saves.
+
+## Single-file download
+- [x] Package the current game and fonts into one offline HTML file.
+- [x] Verify desktop/mobile gameplay, Mass Surge and saved progress in the downloaded file.
+- [x] Deliver the tested HTML download.
