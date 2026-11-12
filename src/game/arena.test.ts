@@ -115,6 +115,16 @@ describe("arena rules", () => {
 });
 
 describe("Mass Surge rules", () => {
+  it("requires at least the starting mass and rejects invalid mass", () => {
+    const s = newSurge();
+    expect(trySurge(s, 9)).toBe(false);
+    expect(trySurge(s, NaN)).toBe(false);
+    expect(trySurge(s, 10)).toBe(true);
+  });
+  it("keeps endgame surge combat mass finite", () => {
+    expect(effectiveMass(1e300, 1.6)).toBe(1e300);
+    expect(canEat(effectiveMass(1e300, 1.6), effectiveMass(1e300, 1.6))).toBe(false);
+  });
   it("runs for four seconds then recharges for eight seconds", () => {
     const s = newSurge();
     expect(trySurge(s)).toBe(true);

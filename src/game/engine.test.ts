@@ -147,6 +147,18 @@ describe("Mass Surge simulation", () => {
     expect(engine.pSurge.cd).toBeGreaterThan(6.9);
     expect(engine.player.vx).toBe(0);
   });
+  it("rejects activation below starting mass without consuming cooldown", () => {
+    isolated(9); engine.surge();
+    expect(engine.pSurge.active).toBe(false); expect(engine.pSurge.cd).toBe(0);
+  });
+  it("uses the displayed growth radius for rival contact", () => {
+    isolated(1000); engine.player.disp = 10;
+    engine.startArena(10); engine.bodies = []; engine.bots = engine.bots.slice(0, 1);
+    engine.player.mass = 1000; engine.player.disp = 10;
+    const b = engine.bots[0]; b.mass = b.disp = 10; b.x = b.tx = 30; b.y = b.ty = 0; b.thinkT = 99;
+    tick(engine, 1 / 60);
+    expect(b.alive).toBe(true);
+  });
   it("rejects surge while paused and resets it for the next run", () => {
     isolated(); engine.pause(); engine.surge(); expect(engine.pSurge.active).toBe(false);
     engine.resume(); engine.surge(); expect(engine.pSurge.active).toBe(true);
@@ -173,6 +185,11 @@ describe("Mass Surge simulation", () => {
   });
 });
 describe("constant speed", () => {
+  it("advances a slow foreground frame by its elapsed time", () => {
+    engine.startArena(10); engine.bots = []; engine.bodies = [];
+    engine.last = 1000; engine.loop(1100);
+    expect(engine.runTime).toBeCloseTo(0.1, 6);
+  });
   it.each([10, 1e3, 1e6, 1e9])("player top speed is identical at %s mass", (mass) => {
     engine.startArena(10); engine.player.mass = engine.player.disp = mass;
     (engine as unknown as { keys: Set<string> }).keys.add("d"); engine.bots = []; engine.bodies = [];

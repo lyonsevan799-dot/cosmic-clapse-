@@ -22,7 +22,7 @@ class Audio {
         this.musicGain.connect(this.ctx.destination);
         this.apply();
       }
-      if (this.ctx.state === "suspended") void this.ctx.resume();
+      if (this.ctx.state !== "running" && this.ctx.state !== "closed") void this.ctx.resume().catch(() => {});
       if (this.wantMusic && !this.musicNodes) this.startMusic();
     } catch { /* audio unavailable */ }
   }

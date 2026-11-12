@@ -1,6 +1,6 @@
 // AI Arena: bot identities, personalities, steering decisions, leaderboard, spatial index.
 // Pure logic — no DOM, no networking. All opponents are simulated locally in the browser.
-import { SKINS, type Skin } from "./data";
+import { PLAYER, SKINS, type Skin } from "./data";
 
 export type Personality = "aggressive" | "explorer" | "collector" | "competitive" | "sneaky" | "balanced";
 
@@ -73,6 +73,7 @@ export const SURGE = {
   /** Maximum visual and combat radius multiplier. */
   radiusMult: 1.6,
   duration: 4,
+  minMass: PLAYER.startMass,
   /** Exponential drain: approximately 3% of the current mass per second. */
   drainPerSec: 0.03,
   /** Recharge begins when the four-second effect ends. */
@@ -87,8 +88,8 @@ export interface SurgeState { active: boolean; t: number; cd: number; scale: num
 export const newSurge = (): SurgeState => ({ active: false, t: 0, cd: 0, scale: 1 });
 
 /** Start a surge only when ready; activation never deals direct damage. */
-export function trySurge(s: SurgeState): boolean {
-  if (s.active || s.cd > 0) return false;
+export function trySurge(s: SurgeState, mass = SURGE.minMass): boolean {
+  if (!Number.isFinite(mass) || mass < SURGE.minMass || s.active || s.cd > 0) return false;
   s.active = true; s.t = 0; s.cd = 0;
   return true;
 }
@@ -126,7 +127,7 @@ export function drainSurgeMass(mass: number, dt: number): number {
 
 /** Cubic scaling keeps the normal 1.4× mass rule consistent with boosted radius. */
 export function effectiveMass(mass: number, scale = 1): number {
-  return mass * Math.pow(Math.max(1, scale), 3);
+  return Math.min(1e300, mass * Math.pow(Math.max(1, scale), 3));
 }
 
 /** Bots surge for nearby hunts and escapes, never while already active or recharging. */

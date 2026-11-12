@@ -26,7 +26,8 @@ export function getSprite(kind: Kind, variant: number): Sprite | null {
   const pad = PAD[kind.style] ?? 1.15;
   const size = Math.ceil(R * 2 * pad);
   const c = document.createElement("canvas"); c.width = c.height = size;
-  const ctx = c.getContext("2d")!;
+  const ctx = c.getContext("2d");
+  if (!ctx) return null;
   ctx.translate(size / 2, size / 2);
   const r = rng(variant * 9973 + kind.style.length * 131 + kind.hue * 7 + 7);
   let tint = "#ffffff";
@@ -46,6 +47,11 @@ export function getSprite(kind: Kind, variant: number): Sprite | null {
     default: break;
   }
   const s = { c, pad, R, tint };
+  // Bound retained offscreen canvases during endless progression; active bodies retain their sprites.
+  if (cache.size >= 180) {
+    const oldest = cache.keys().next().value;
+    if (oldest !== undefined) cache.delete(oldest);
+  }
   cache.set(key, s);
   return s;
 }

@@ -25,7 +25,7 @@ interface FloatText { text: string; life: number; color: string; big: boolean; }
 
 export interface HudState {
   mass: number; time: number;
-  surgePhase: "ready" | "active" | "cooldown";
+  surgePhase: "ready" | "active" | "cooldown" | "unavailable";
   /** Active time remaining, or cooldown recharge progress. */
   surgeProgress: number;
   surgeRemaining: number;
@@ -130,7 +130,7 @@ export class Engine {
   setBoost(on: boolean) { this.boostBtn = on; }
   /** Mass Surge: temporary radius and absorption power, paid for with mass. */
   surge() {
-    if (this.mode !== "play" || this.paused || !this.arena || !this.playerAlive || !trySurge(this.pSurge)) return;
+    if (this.mode !== "play" || this.paused || !this.arena || !this.playerAlive || !trySurge(this.pSurge, this.player.mass)) return;
     const P = this.player, r = radiusForMass(P.mass);
     this.rings.push({ x: P.x, y: P.y, r, max: r * 3.2, life: 0, dur: 0.55, color: this.skin.hot, width: 4 });
     this.texts.push({ text: "MASS SURGE", life: 0, color: this.skin.hot, big: true });
@@ -358,7 +358,8 @@ export class Engine {
       }
       if (bot.surge.active) bot.mass = drainSurgeMass(bot.mass, Math.min(dt, Math.max(0, SURGE.duration - bot.surge.t)));
       tickSurge(bot.surge, dt);
-      const r = radiusForMass(bot.mass) * bot.surge.scale;
+      bot.disp = Math.exp(Math.log(bot.disp) + (Math.log(bot.mass) - Math.log(bot.disp)) * (1 - Math.exp(-dt * 4)));
+      const r = radiusForMass(bot.disp) * bot.surge.scale;
       bot.thinkT -= dt;
       if (bot.thinkT <= 0) {
         const react = PERSONALITIES[bot.personality].react;
@@ -381,7 +382,7 @@ export class Engine {
           if (d < fd) { food = b; fd = d; }
         }
         decide(bot, { threat, prey, food }, Math.random, this.worldR);
-        if (shouldSurge(bot.surge, bot.mode, bot.mode === "hunt" ? pd : td, r, Math.random)) trySurge(bot.surge);
+        if (shouldSurge(bot.surge, bot.mode, bot.mode === "hunt" ? pd : td, r, Math.random)) trySurge(bot.surge, bot.mass);
       }
       const dx = bot.tx - bot.x, dy = bot.ty - bot.y, d = Math.hypot(dx, dy) || 1;
       const a = Math.atan2(dy, dx) + Math.sin(this.time * 1.4 + bot.wob) * 0.12;
@@ -389,15 +390,14 @@ export class Engine {
       const inp = Math.min(1, d / (r * 3));
       steer(bot, Math.cos(a) * inp, Math.sin(a) * inp, speed, dt);
       bot.x += bot.vx * dt; bot.y += bot.vy * dt; this.clampToArena(bot);
-      bot.disp = Math.exp(Math.log(bot.disp) + (Math.log(bot.mass) - Math.log(bot.disp)) * (1 - Math.exp(-dt * 4)));
       const nearby: Bot[] = []; this.botGrid.query(bot.x, bot.y, r * 3, nearby);
       for (const other of nearby) {
         if (other === bot || !other.alive || !bot.alive) continue;
-        const od = Math.hypot(bot.x - other.x, bot.y - other.y), orad = radiusForMass(other.mass) * other.surge.scale;
+        const od = Math.hypot(bot.x - other.x, bot.y - other.y), orad = radiusForMass(other.disp) * other.surge.scale;
         if (this.canTake(bot.mass, bot.surge, other.mass, other.surge) && od < r * 0.95 + orad * 0.35) this.eatBot(other, bot);
       }
       if (this.playerAlive && bot.alive) {
-        const distance = Math.hypot(bot.x - P.x, bot.y - P.y), prad = radiusForMass(P.mass) * this.pSurge.scale;
+        const distance = Math.hypot(bot.x - P.x, bot.y - P.y), prad = radiusForMass(P.disp) * this.pSurge.scale;
         if (this.canTake(P.mass, this.pSurge, bot.mass, bot.surge) && distance < prad * 0.95 + r * 0.35) this.eatBot(bot, "player");
         else if (this.canTake(bot.mass, bot.surge, P.mass, this.pSurge) && distance < r * 0.95 + prad * 0.35) {
           this.playerAlive = false; this.playerKiller = bot; this.playerDieT = 0; this.resetInput();
@@ -423,9 +423,15 @@ export class Engine {
     // Schedule first: a recoverable entity failure cannot stop future frames.
     // Unrelated programming errors still surface normally; no blanket catch.
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(1 / 30, Math.max(0, (now - this.last) / 1000));
+    const elapsed = Math.min(0.25, Math.max(0, (now - this.last) / 1000));
     this.last = now;
-    if (!this.paused) this.update(dt);
+    if (document.hidden) return;
+    // Catch up ordinary slow frames without tunnelling; bound work after stalls.
+    let remaining = elapsed;
+    while (!this.paused && remaining > 1e-9) {
+      const dt = Math.min(1 / 60, remaining);
+      this.update(dt); remaining -= dt;
+    }
     this.render();
   };
 
@@ -507,7 +513,7 @@ export class Engine {
     const gravR = pr * PLAYER.gravityMult;
     const vr = this.viewRadius();
     const z = this.cam.zoom;
-    const botSenseRadius = this.arena ? this.bots.reduce((max, bot) => bot.alive ? Math.max(max, radiusForMass(bot.mass) * bot.surge.scale * PLAYER.gravityMult) : max, 0) : 0;
+    const botSenseRadius = this.arena ? this.bots.reduce((max, bot) => bot.alive ? Math.max(max, radiusForMass(bot.disp) * bot.surge.scale * PLAYER.gravityMult) : max, 0) : 0;
     let eligibleCount = 0;
     for (const b of this.bodies) {
       if (![b.x, b.y, b.vx, b.vy, b.r, b.mass, b.rot, b.spin, b.t, b.dur].every(Number.isFinite) || b.r <= 0 || b.mass <= 0 || b.dur <= 0) {
@@ -535,7 +541,7 @@ export class Engine {
         let nearest = owner && canAbsorb(effectiveMass(P.mass, this.arena ? this.pSurge.scale : 1), b.kind) ? Math.hypot(P.x - b.x, P.y - b.y) / pr : Infinity;
         const nearby: Bot[] = []; this.botGrid.query(b.x, b.y, botSenseRadius + b.r, nearby);
         for (const bot of nearby) if (bot.alive && canAbsorb(effectiveMass(bot.mass, bot.surge.scale), b.kind)) {
-          const r = radiusForMass(bot.mass) * bot.surge.scale, d = Math.hypot(bot.x - b.x, bot.y - b.y);
+          const r = radiusForMass(bot.disp) * bot.surge.scale, d = Math.hypot(bot.x - b.x, bot.y - b.y);
           if (d < r * PLAYER.gravityMult + b.r && d / r < nearest) { owner = bot; nearest = d / r; }
         }
       }
@@ -600,8 +606,8 @@ export class Engine {
 
   emitHud() {
     const s = this.pSurge;
-    const surgePhase = s.active ? "active" as const : s.cd > 0 ? "cooldown" as const : "ready" as const;
-    const surgeProgress = s.active ? Math.max(0, 1 - s.t / SURGE.duration) : s.cd > 0 ? 1 - s.cd / SURGE.cooldown : 1;
+    const surgePhase = s.active ? "active" as const : s.cd > 0 ? "cooldown" as const : this.player.mass < SURGE.minMass ? "unavailable" as const : "ready" as const;
+    const surgeProgress = s.active ? Math.max(0, 1 - s.t / SURGE.duration) : s.cd > 0 ? 1 - s.cd / SURGE.cooldown : this.player.mass < SURGE.minMass ? 0 : 1;
     this.cb.onHud?.({ mass: this.player.mass, time: this.runTime, surgePhase, surgeProgress,
       surgeRemaining: s.active ? Math.max(0, SURGE.duration - s.t) : 0, surgeCooldown: s.cd });
   }

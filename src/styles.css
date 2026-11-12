@@ -74,7 +74,7 @@
 
 @layer components {
   .cc-title {
-    font-family: var(--font-display); font-weight: 800; letter-spacing: -0.02em;
+    font-family: var(--font-display); font-weight: 800; letter-spacing: 0;
     background: var(--gradient-title); -webkit-background-clip: text; background-clip: text; color: transparent;
     filter: drop-shadow(0 0 24px color-mix(in oklab, var(--violet) 50%, transparent));
   }
@@ -108,6 +108,34 @@
   .cc-joy-base { border-radius: 999px; background: oklch(1 0 0 / 0.06); border: 2px solid color-mix(in oklab, var(--primary) 40%, transparent); }
   .cc-joy-knob { border-radius: 999px; background: color-mix(in oklab, var(--primary) 70%, transparent); box-shadow: var(--shadow-glow); }
   .cc-btn { height: auto; white-space: normal; }
+}
+
+.cc-app { -webkit-user-select: none; }
+.cc-menu { touch-action: pan-y; padding-top: max(1rem, env(safe-area-inset-top)); padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+.cc-leaderboard { pointer-events: none; }
+.cc-joystick { left: max(2rem, env(safe-area-inset-left)); bottom: max(2rem, env(safe-area-inset-bottom)); }
+.cc-boost { right: max(2rem, env(safe-area-inset-right)); bottom: max(2.5rem, env(safe-area-inset-bottom)); }
+.cc-surge { right: max(2.5rem, env(safe-area-inset-right)); }
+.cc-feed { bottom: max(1rem, env(safe-area-inset-bottom)); }
+
+@media (max-height: 540px) {
+  .cc-menu { gap: 0.5rem; justify-content: flex-start; }
+  .cc-menu .cc-title { font-size: 2rem; }
+  .cc-menu > div:last-child { margin: auto; }
+  .cc-leaderboard { top: 1rem; right: 7.5rem; width: 10rem; }
+  .cc-leaderboard li:nth-child(n+4) { display: none; }
+  .cc-leaderboard > div:last-child { display: none; }
+  .cc-tutorial { bottom: 1rem; left: 10rem; right: 8rem; }
+  .cc-tutorial p { font-size: 0.75rem; }
+  .cc-tutorial > div { padding: 0.5rem; }
+  .cc-feed { display: none; }
+}
+
+@media (max-width: 359px) {
+  .cc-menu .cc-title { font-size: 2rem; }
+  .cc-joystick { width: 6rem; height: 6rem; left: 1rem; }
+  .cc-boost { width: 4.5rem; height: 4.5rem; right: 1rem; }
+  .cc-surge { width: 4rem; height: 4rem; right: 1.5rem; bottom: 8rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {

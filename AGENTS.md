@@ -16,3 +16,4 @@
 - Keep respawn geometry and sparse-grid bounds in pure arena helpers; use asymptotic camera zoom and guarded rendering so late-game stability never depends on reducing player mass.
 
 - Mass Surge timing, drain, absorption scaling and AI activation live as pure helpers in src/game/arena.ts so human and bot combat share testable rules.
+- Use smoothed display radii for all hole contact geometry, bounded substeps for foreground elapsed time, and a bounded procedural sprite cache to keep collisions visible and long sessions stable.

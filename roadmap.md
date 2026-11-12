@@ -22,3 +22,9 @@
 - [x] Package the current game and fonts into one offline HTML file.
 - [x] Verify desktop/mobile gameplay, Mass Surge and saved progress in the downloaded file.
 - [x] Deliver the tested HTML download.
+
+## CrazyGames Basic Launch preparation
+- [ ] Audit gameplay, saves, audio, performance and official upload requirements.
+- [ ] Fix verified major issues while preserving the existing arena and progression.
+- [ ] Test the final static production game across desktop, touch and resized screens.
+- [ ] Inspect and deliver the upload ZIP, build metrics, testing report and submission copy.

@@ -16,8 +16,8 @@ interface Confirm { title: string; body: string; yes: string; onYes: () => void;
 const TUTORIAL = [
   "Steer with your mouse or WASD. Hold click or Space to boost. Press E for a four-second Mass Surge.",
   "Look for objects small enough to absorb — they glow with a ring.",
-  "Nearby objects are pulled toward your event horizon.",
-  "Every absorption adds mass. Locked objects show a padlock.",
+  "Rivals grow too. Avoid larger holes; Surge expands your reach but drains mass.",
+  "Surge lasts four seconds, drains mass and recharges for eight seconds.",
   "Grow forever — bigger objects appear as you grow.",
 ];
 const fmtTime = (s: number) => { const h = Math.floor(s / 3600); const m = Math.floor((s % 3600) / 60); return `${h ? h + "h " : ""}${m}m ${Math.floor(s % 60)}s`; };
@@ -38,6 +38,7 @@ export default function CosmicCollapse() {
   const [tut, setTut] = useState<number | null>(null);
   const tutRef = useRef<{ step: number | null; since: number; flags: Set<string> }>({ step: null, since: 0, flags: new Set() });
   const toastId = useRef(0);
+  const toastTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const lastTime = useRef(0);
   const dirty = useRef(false);
   const [arenaMode, setArenaMode] = useState(false);
@@ -49,7 +50,8 @@ export default function CosmicCollapse() {
   const toast = useCallback((msg: string, ach = false) => {
     const id = ++toastId.current;
     setToasts((t) => [...t.slice(-2), { id, msg, ach }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 2800);
+    const timer = setTimeout(() => { toastTimers.current.delete(timer); setToasts((t) => t.filter((x) => x.id !== id)); }, 2800);
+    toastTimers.current.add(timer);
   }, []);
   /** Persist run mass + play time from the engine. */
   const flush = useCallback(() => {
@@ -102,10 +104,13 @@ export default function CosmicCollapse() {
     const unlock = () => sfx.unlock();
     window.addEventListener("pointerdown", unlock);
     window.addEventListener("keydown", unlock);
+    window.addEventListener("pointerup", unlock);
     const iv = setInterval(() => { if (screenRef.current === "play") flush(); else if (dirty.current) commit(saveRef.current); }, 3000);
-    const unload = () => flush();
+    const unload = () => { flush(); if (dirty.current) commit(saveRef.current); };
+    const hide = () => { if (document.hidden) unload(); };
+    document.addEventListener("visibilitychange", hide);
     window.addEventListener("beforeunload", unload);
-    return () => { clearInterval(iv); e.destroy(); window.removeEventListener("pointerdown", unlock); window.removeEventListener("keydown", unlock); window.removeEventListener("beforeunload", unload); };
+    return () => { clearInterval(iv); toastTimers.current.forEach(clearTimeout); sfx.music(false); e.destroy(); document.removeEventListener("visibilitychange", hide); window.removeEventListener("pointerup", unlock); window.removeEventListener("pointerdown", unlock); window.removeEventListener("keydown", unlock); window.removeEventListener("beforeunload", unload); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -144,7 +149,7 @@ export default function CosmicCollapse() {
     setScreen("play");
   };
   const startArena = () => {
-    flush(); setArenaMode(true); setPaused(false); setConfirm(null); setFeed([]); setTutStep(null);
+    flush(); setArenaMode(true); setPaused(false); setConfirm(null); setFeed([]); tutRef.current.flags = new Set(); setTutStep(!saveRef.current.tutorialDone ? 0 : null);
     engineRef.current?.startArena(saveRef.current.settings.botCount); lastTime.current = 0; setScreen("play");
   };
   const moveJoystick = useCallback((x: number, y: number) => engineRef.current?.setJoystick(x, y), []);
@@ -159,7 +164,7 @@ export default function CosmicCollapse() {
   const best = Math.max(save.bestMass, hud.mass);
 
   return (
-    <div className="fixed inset-0 overflow-hidden bg-background text-foreground" style={{ touchAction: "none" }}>
+    <div className="cc-app fixed inset-0 overflow-hidden bg-background text-foreground" style={{ touchAction: "none" }}>
       <canvas ref={canvasRef} className="absolute inset-0 block" aria-label="Game view" />
 
       <div className="pointer-events-none absolute inset-x-4 top-4 z-40 flex flex-col items-center gap-2 sm:top-28">
@@ -169,7 +174,7 @@ export default function CosmicCollapse() {
       </div>
 
       {screen === "menu" && (
-        <div className="cc-screen absolute inset-0 z-20 flex flex-col items-center justify-between gap-4 overflow-y-auto p-4 sm:p-6">
+        <div className="cc-menu cc-screen absolute inset-0 z-20 flex flex-col items-center justify-between gap-4 overflow-y-auto p-4 sm:p-6">
           <div className="flex w-full justify-end"><span className="cc-chip">Best {formatMass(save.bestMass)} mass</span></div>
           <div className="text-center">
             <h1 className="cc-title text-4xl leading-none sm:text-6xl md:text-7xl">COSMIC<br />COLLAPSE</h1>
@@ -183,7 +188,8 @@ export default function CosmicCollapse() {
               <Button variant="secondary" className="cc-btn" onClick={() => { click(); setScreen("hangar"); }}>Skins</Button>
               <Button variant="secondary" className="cc-btn" onClick={() => { click(); setSettingsFrom("menu"); setScreen("settings"); }}>Settings</Button>
             </div>
-            <p className="mt-2 text-center text-xs text-muted-foreground">Steer with your mouse or WASD · Hold click or Space to boost · E for Mass Surge · Esc to pause</p>
+            <p className="mt-2 text-center text-xs text-muted-foreground">{coarse ? "Joystick to steer · BOOST for speed · SURGE for temporary power" : "Mouse or WASD to steer · Click or Space to boost · E / Shift for Mass Surge"}</p>
+            <p className="text-center text-xs text-muted-foreground">Absorb smaller objects. Outgrow your rivals. Spend mass to surge.</p>
           </div>
         </div>
       )}
@@ -267,7 +273,7 @@ export default function CosmicCollapse() {
               <div className="text-[11px] text-muted-foreground">{arenaMode ? `${arenaState.alive} in arena` : `Best ${formatMass(best)}`}</div>
               {arenaMode && <div className="mt-1.5" aria-label="Mass Surge status">
                 <div className="mb-0.5 text-[10px] uppercase tracking-widest text-muted-foreground">
-                  {hud.surgePhase === "ready" ? "Surge ready · E" : hud.surgePhase === "active" ? `Surge · ${hud.surgeRemaining.toFixed(1)}s` : `Recharging · ${Math.ceil(hud.surgeCooldown)}s`}
+                  {hud.surgePhase === "unavailable" ? "Surge needs 10 mass" : hud.surgePhase === "ready" ? (coarse ? "Surge ready" : "Surge ready · E") : hud.surgePhase === "active" ? `Surge · ${hud.surgeRemaining.toFixed(1)}s` : `Recharging · ${Math.ceil(hud.surgeCooldown)}s`}
                 </div>
                 <div className="cc-progress-track"><div className="cc-progress-fill" style={{ width: `${hud.surgeProgress * 100}%` }} /></div>
               </div>}
@@ -284,7 +290,7 @@ export default function CosmicCollapse() {
             </div>
           </div>
 
-          {arenaMode && <div className="cc-panel absolute right-3 top-36 z-20 w-44 px-3 py-2 sm:right-4 sm:top-24 sm:w-56">
+          {arenaMode && <div className="cc-leaderboard cc-panel absolute right-3 top-36 z-20 w-44 px-3 py-2 sm:right-4 sm:top-24 sm:w-56">
             <div className="mb-2 flex justify-between text-xs font-semibold"><span>Leaderboard</span><span className="text-primary">#{arenaState.rank}</span></div>
             <ol className="space-y-1 text-[10px] sm:text-xs">{arenaState.leaders.map((entry, i) => (
               <li key={entry.name} className={`${i >= 5 ? "hidden sm:flex" : "flex"} items-center gap-1 ${entry.isPlayer ? "font-bold text-primary" : "text-muted-foreground"}`}>
@@ -293,9 +299,9 @@ export default function CosmicCollapse() {
             ))}</ol>
             <div className="mt-2 border-t border-border pt-2 text-xs text-primary">{arenaState.rank === 1 ? "♛ Arena leader" : `You · rank ${arenaState.rank}`}</div>
           </div>}
-          {arenaMode && <div className="pointer-events-none absolute bottom-4 right-3 z-20 max-w-[55%] text-right text-[10px] text-muted-foreground">{feed.map((line, i) => <div key={`${line}-${i}`}>{line}</div>)}</div>}
+          {arenaMode && <div className="cc-feed pointer-events-none absolute bottom-4 right-3 z-20 max-w-[55%] text-right text-[10px] text-muted-foreground">{feed.map((line, i) => <div key={`${line}-${i}`}>{line}</div>)}</div>}
           {tut !== null && !paused && (
-            <div className="absolute inset-x-0 bottom-36 z-20 flex justify-center px-4 sm:bottom-10">
+            <div className="cc-tutorial absolute inset-x-0 bottom-36 z-20 flex justify-center px-4 sm:bottom-10">
               <div className="cc-panel cc-screen flex max-w-md items-center gap-3 px-4 py-3" key={tut}>
                 <span className="font-display text-xs text-primary">{tut + 1}/5</span>
                 <p className="text-sm">{tut === 0 && coarse ? "Move with the joystick." : TUTORIAL[tut]}</p>
@@ -306,11 +312,11 @@ export default function CosmicCollapse() {
 
           {coarse && !paused && <Joystick onMove={moveJoystick} />}
           {coarse && !paused && (<>
-            <Button variant="ghost" type="button" aria-label="Boost" className="cc-joy-base absolute bottom-10 right-8 z-20 flex h-24 w-24 items-center justify-center rounded-full text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
+            <Button variant="ghost" type="button" aria-label="Boost" className="cc-boost cc-joy-base absolute bottom-10 right-8 z-20 flex h-24 w-24 items-center justify-center rounded-full text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
               onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); engineRef.current?.setBoost(true); }}
               onPointerUp={() => engineRef.current?.setBoost(false)} onPointerCancel={() => engineRef.current?.setBoost(false)} onLostPointerCapture={() => engineRef.current?.setBoost(false)}>BOOST</Button>
-            <Button variant="ghost" type="button" aria-label="Mass Surge" className="cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center rounded-full text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
-              disabled={hud.surgePhase !== "ready"} onClick={() => engineRef.current?.surge()}><span>{hud.surgePhase === "ready" ? "SURGE" : hud.surgePhase === "active" ? `${hud.surgeRemaining.toFixed(1)}s` : `${Math.ceil(hud.surgeCooldown)}s`}</span></Button>
+            <Button variant="ghost" type="button" aria-label="Mass Surge" className="cc-surge cc-joy-base absolute bottom-40 right-10 z-20 flex h-20 w-20 items-center justify-center rounded-full text-xs font-semibold text-foreground" style={{ touchAction: "none" }}
+              disabled={hud.surgePhase !== "ready"} onClick={() => engineRef.current?.surge()}><span>{hud.surgePhase === "unavailable" ? "10 MASS" : hud.surgePhase === "ready" ? "SURGE" : hud.surgePhase === "active" ? `${hud.surgeRemaining.toFixed(1)}s` : `${Math.ceil(hud.surgeCooldown)}s`}</span></Button>
           </>)}
 
           {paused && !confirm && (
@@ -464,7 +470,7 @@ function Joystick({ onMove }: { onMove: (x: number, y: number) => void }) {
   const end = () => { active.current = null; setKnob({ x: 0, y: 0 }); onMove(0, 0); };
   useEffect(() => () => onMove(0, 0), [onMove]);
   return (
-    <div className="cc-joy-base absolute bottom-8 left-8 z-20 flex h-32 w-32 items-center justify-center" style={{ touchAction: "none" }}
+    <div className="cc-joystick cc-joy-base absolute bottom-8 left-8 z-20 flex h-32 w-32 items-center justify-center" style={{ touchAction: "none" }}
       onPointerDown={(e) => { if (active.current !== null) return; const r = e.currentTarget.getBoundingClientRect(); center.current = { x: r.left + r.width / 2, y: r.top + r.height / 2 }; active.current = e.pointerId; e.currentTarget.setPointerCapture(e.pointerId); update(e); }}
       onPointerMove={(e) => { if (active.current === e.pointerId) update(e); }}
       onPointerUp={(e) => { if (active.current === e.pointerId) end(); }} onPointerCancel={(e) => { if (active.current === e.pointerId) end(); }} onLostPointerCapture={(e) => { if (active.current === e.pointerId) end(); }}>
