@@ -118,6 +118,10 @@
 .cc-surge { right: max(2.5rem, env(safe-area-inset-right)); }
 .cc-feed { bottom: max(1rem, env(safe-area-inset-bottom)); }
 
+@media (pointer: coarse) and (min-height: 541px) {
+  .cc-tutorial { bottom: 16rem; }
+}
+
 @media (max-height: 540px) {
   .cc-menu { gap: 0.5rem; justify-content: flex-start; }
   .cc-menu .cc-title { font-size: 2rem; }

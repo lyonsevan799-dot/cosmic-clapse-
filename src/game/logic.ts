@@ -178,7 +178,7 @@ let memoryStore: string | null = null;
 export let storageAvailable = true;
 export function loadSave(): SaveData {
   try {
-    const raw = window.localStorage.getItem(SAVE_KEY);
+    const raw = window.localStorage.getItem(SAVE_KEY) ?? memoryStore;
     return validateSave(raw ? JSON.parse(raw) : null);
   } catch {
     storageAvailable = false;

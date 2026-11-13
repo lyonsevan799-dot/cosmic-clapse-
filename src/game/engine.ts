@@ -84,6 +84,7 @@ export class Engine {
     canvas.addEventListener("pointermove", this.onPMove);
     canvas.addEventListener("pointerdown", this.onPDown);
     window.addEventListener("pointerup", this.onPUp);
+    window.addEventListener("pointercancel", this.onPUp);
     window.addEventListener("blur", this.onBlurEv);
     document.addEventListener("visibilitychange", this.onVis);
     this.buildStars();
@@ -100,6 +101,7 @@ export class Engine {
     this.canvas.removeEventListener("pointermove", this.onPMove);
     this.canvas.removeEventListener("pointerdown", this.onPDown);
     window.removeEventListener("pointerup", this.onPUp);
+    window.removeEventListener("pointercancel", this.onPUp);
     window.removeEventListener("blur", this.onBlurEv);
     document.removeEventListener("visibilitychange", this.onVis);
   }
@@ -109,6 +111,8 @@ export class Engine {
   // ---------- input ----------
   onKeyDown = (e: KeyboardEvent) => {
     const k = e.key.toLowerCase();
+    const target = e.target as HTMLElement | null;
+    if (target && (target.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName))) return;
     if (k === "escape") { if (this.mode === "play") this.cb.onPauseRequest?.(); return; }
     if (k === " ") {
       const tgt = e.target as HTMLElement | null;
@@ -125,7 +129,7 @@ export class Engine {
   };
   onKeyUp = (e: KeyboardEvent) => { const k = e.key.toLowerCase(); this.keys.delete(k === " " ? "space" : k); };
   onPMove = (e: PointerEvent) => { if (e.pointerType !== "mouse") return; this.mouse.x = e.clientX; this.mouse.y = e.clientY; this.mouse.active = true; };
-  onPDown = (e: PointerEvent) => { if (e.pointerType !== "mouse") return; this.onPMove(e); this.mouse.down = true; };
+  onPDown = (e: PointerEvent) => { if (e.pointerType !== "mouse" || e.button !== 0) return; this.onPMove(e); this.mouse.down = true; };
   onPUp = () => { this.mouse.down = false; };
   setBoost(on: boolean) { this.boostBtn = on; }
   /** Mass Surge: temporary radius and absorption power, paid for with mass. */

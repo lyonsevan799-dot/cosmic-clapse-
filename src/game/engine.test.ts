@@ -20,6 +20,18 @@ beforeEach(() => {
 afterEach(() => { engine.destroy(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("arena simulation", () => {
+  it("clears mouse boost after a cancelled pointer", () => {
+    engine.startArena(10);
+    engine.mouse.down = true;
+    window.dispatchEvent(new Event("pointercancel"));
+    expect(engine.mouse.down).toBe(false);
+  });
+  it("does not activate surge while editing a setting", () => {
+    engine.startArena(10);
+    const input = document.createElement("input");
+    engine.onKeyDown({ key: "e", target: input, repeat: false } as unknown as KeyboardEvent);
+    expect(engine.pSurge.active).toBe(false);
+  });
   it.each([10000, 50000, 100000, 150000, 200000, 500000, 1e6, 1e7, 1e8, 1e9])("keeps respawning, collecting and rendering at %s mass", (mass) => {
     engine.startArena(10);
     engine.player.mass = engine.player.disp = mass;

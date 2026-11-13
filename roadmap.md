@@ -24,7 +24,11 @@
 - [x] Deliver the tested HTML download.
 
 ## CrazyGames Basic Launch preparation
-- [ ] Audit gameplay, saves, audio, performance and official upload requirements.
-- [ ] Fix verified major issues while preserving the existing arena and progression.
-- [ ] Test the final static production game across desktop, touch and resized screens.
-- [ ] Inspect and deliver the upload ZIP, build metrics, testing report and submission copy.
+- [x] Audit gameplay, saves, audio, performance and official upload requirements; report physical-device and long-session limits.
+- [x] Fix verified major issues while preserving the existing arena and progression.
+- [x] Test the final static production game across desktop, touch and resized screens.
+- [x] Inspect and deliver the upload ZIP, build metrics, testing report and submission copy.
+
+## Final bug checks
+- [x] Check input cancellation, storage recovery and arena record edge cases.
+- [x] Run the complete regression suite and verify the packaged game.

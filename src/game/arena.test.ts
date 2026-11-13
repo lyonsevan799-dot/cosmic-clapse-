@@ -19,6 +19,11 @@ const testBot = (over: Partial<Bot> = {}): Bot => ({
 });
 
 describe("arena rules", () => {
+  it("creates all 150 unique opponents even with a repeated random value", () => {
+    const used = new Set<string>();
+    for (let i = 0; i < 150; i++) makeBotName(() => 0.5, used);
+    expect(used.size).toBe(150);
+  });
   it("generates unique bot names", () => {
     const used = new Set<string>();
     const names = new Set<string>();

@@ -68,7 +68,14 @@ export default function CosmicCollapse() {
   useEffect(() => {
     const canvas = canvasRef.current; if (!canvas) return;
     const e = new Engine(canvas, {
-      onHud: setHud,
+      onHud: (state) => {
+        setHud(state);
+        // Keep the peak even if Surge drains it before the next periodic save.
+        if (state.mass > saveRef.current.bestMass) {
+          saveRef.current = unlockAchievements(saveRef.current, state.mass).save;
+          dirty.current = true;
+        }
+      },
       onArena: (state) => {
         setArenaState(state);
         saveRef.current = { ...saveRef.current, stats: { ...saveRef.current.stats, bestRank: Math.min(saveRef.current.stats.bestRank, state.rank) } };

@@ -189,10 +189,10 @@ export function makeBotName(rand: () => number, used: Set<string>): string {
       return n;
     }
   }
-  let n = "";
-  do {
-    n = "Drifter" + Math.floor(rand() * 1000);
-  } while (used.has(n));
+  // A repeated random value must never trap arena creation in an infinite loop.
+  let suffix = used.size;
+  let n = `Drifter${suffix}`;
+  while (used.has(n)) n = `Drifter${++suffix}`;
   used.add(n);
   return n;
 }

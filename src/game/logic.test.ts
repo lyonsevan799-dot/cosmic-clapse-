@@ -1,8 +1,16 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { kindAt, topEligibleIndex } from "./data";
-import { addMass, canAbsorb, defaultSave, formatMass, recordAbsorb, recordArenaProgress, unlockAchievements, validateSave } from "./logic";
+import { addMass, canAbsorb, defaultSave, formatMass, loadSave, recordAbsorb, recordArenaProgress, unlockAchievements, validateSave, writeSave } from "./logic";
 
 describe("endless rules", () => {
+  it("preserves session progress when storage writes are blocked", () => {
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    const get = vi.spyOn(Storage.prototype, "getItem").mockReturnValue(null);
+    try {
+      writeSave({ ...defaultSave(), bestMass: 5000 });
+      expect(loadSave().bestMass).toBe(5000);
+    } finally { set.mockRestore(); get.mockRestore(); }
+  });
   it("tiny black hole can absorb debris but not a gas giant", () => {
     expect(canAbsorb(10, 0)).toBe(true);
     expect(canAbsorb(10, 7)).toBe(false);
