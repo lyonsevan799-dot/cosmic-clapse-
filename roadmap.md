@@ -32,3 +32,9 @@
 ## Final bug checks
 - [x] Check input cancellation, storage recovery and arena record edge cases.
 - [x] Run the complete regression suite and verify the packaged game.
+
+## Final revalidation — November 14, 2026
+- [x] Rerun all 71 automated tests and confirm the preview build is clean.
+- [x] Recheck preview and extracted upload ZIP: menus, Mass Surge, pause, settings, restart and saved progress.
+- [x] Inspect desktop and touch-emulated gameplay screenshots; confirm archive integrity and no failed package asset requests.
+- [x] Confirm no newly reproduced bugs; retain real-device, long-session and CrazyGames approval limitations.
